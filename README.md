@@ -7,6 +7,7 @@ What it does:
 - Guards `AutoComplete` reposition work so inactive instances do not recompute layout on every mobile `resize`
 - Replaces the stock `power-user` window `resize` handler with a version that exits early on mobile before expensive autocomplete and hotswap refresh work runs
 - Speeds up opening the chat file manager for normal character chats by rendering a lightweight file-name list first, then using one full metadata request to fill in file size, message count, date, and preview text
+- Speeds up opening and closing World Info entry editors by skipping the expensive height animation for top-level entry drawers, keeping initialized editors alive while collapsed, and lazily initializing heavier Select2 controls and character filter options
 - Speeds up prompt preset toggles and saves by updating only the affected prompt row immediately, then refreshing token counts after a short debounce instead of rebuilding the whole prompt list on every click
 - Adds a SillyTavern extension settings panel with separate switches for the input responsiveness and chat file manager optimizations
 

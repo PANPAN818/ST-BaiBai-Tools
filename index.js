@@ -5,7 +5,7 @@ import { promptManager } from '../../../openai.js';
 import { INJECTION_POSITION } from '../../../PromptManager.js';
 import { isMobile, favsToHotswap } from '../../../RossAscends-mods.js';
 import { power_user } from '../../../power-user.js';
-import { debounce, timestampToMoment } from '../../../utils.js';
+import { debounce, resetScrollHeight, timestampToMoment } from '../../../utils.js';
 
 const LOG_PREFIX = '[柏宝箱]';
 const MODULE_NAME = getModuleName();
@@ -16,12 +16,21 @@ const FAST_CHAT_LIST_SCROLL_STYLE_ID = 'bai_bai_toolkit_fast_chat_list_scroll_st
 const PRESET_SCROLL_STYLE_ID = 'bai_bai_toolkit_preset_scroll_style';
 const PRESET_TOGGLE_HANDLER_KEY = '__baiBaiToolkitPresetToggleHandler';
 const PRESET_SAVE_HANDLER_KEY = '__baiBaiToolkitPresetSaveHandler';
+const WORLD_INFO_DRAWER_HANDLER_KEY = '__baiBaiToolkitWorldInfoDrawerHandler';
+const WORLD_INFO_LAZY_SELECT2_PATCH_KEY = '__baiBaiToolkitWorldInfoLazySelect2Patched';
+const WORLD_INFO_CHARACTER_FILTER_APPEND_PATCH_KEY = '__baiBaiToolkitWorldInfoCharacterFilterAppendPatched';
 const CHAT_MANAGEMENT_POPUP_SELECTOR = '#shadow_select_chat_popup';
 const CHAT_MANAGEMENT_LIST_SELECTOR = '#select_chat_div';
 const PRESET_PROMPT_MANAGER_LIST_SELECTOR = '#completion_prompt_manager_list';
 const PRESET_PROMPT_MANAGER_SAVE_SELECTOR = '#completion_prompt_manager_popup_entry_form_save';
+const WORLD_INFO_ENTRY_DRAWER_TOGGLE_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer > .inline-drawer-header .inline-drawer-toggle';
+const WORLD_INFO_ENTRY_DRAWER_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer';
+const WORLD_INFO_LAZY_SELECT2_SELECTOR = '#world_popup_entries_list .world_entry_edit select[name="characterFilter"], #world_popup_entries_list .world_entry_edit select[name="triggers"]';
+const WORLD_INFO_LAZY_SELECT2_DATASET_KEY = 'baiBaiToolkitLazySelect2';
+const WORLD_INFO_DEFERRED_OPTIONS_DATASET_KEY = 'baiBaiToolkitDeferredOptions';
 const defaultSettings = {
     resizeGuardEnabled: true,
+    worldInfoDrawerOptimizationEnabled: true,
     fastChatListEnabled: true,
     chatListScrollOptimizationEnabled: true,
     chatListAutoClearEnabled: true,
@@ -112,6 +121,19 @@ async function renderSettingsPanel() {
             applyFeatureSettings();
         });
 
+    $('#bai_bai_toolkit_world_info_drawer_optimization_enabled')
+        .prop('checked', settings.worldInfoDrawerOptimizationEnabled)
+        .on('input', function () {
+            settings.worldInfoDrawerOptimizationEnabled = Boolean($(this).prop('checked'));
+            if (!settings.worldInfoDrawerOptimizationEnabled) {
+                initializeDeferredWorldInfoSelect2(document);
+            }
+            saveExtensionSettings();
+            applyWorldInfoDrawerOptimization();
+            applyWorldInfoLazySelect2Optimization();
+            applyWorldInfoCharacterFilterOptionsOptimization();
+        });
+
     $('#bai_bai_toolkit_fast_chat_list_enabled')
         .prop('checked', settings.fastChatListEnabled)
         .on('input', function () {
@@ -162,6 +184,9 @@ function applyFeatureSettings() {
     }
 
     applyFastChatListScrollOptimization();
+    applyWorldInfoDrawerOptimization();
+    applyWorldInfoLazySelect2Optimization();
+    applyWorldInfoCharacterFilterOptionsOptimization();
     applyPresetScrollOptimization();
     applyPresetToggleOptimization();
     applyPresetSaveOptimization();
@@ -216,6 +241,271 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} > li.completion_prompt_manager_prompt {
     contain: paint style;
 }
 `;
+}
+
+function applyWorldInfoDrawerOptimization() {
+    if (extensionState[WORLD_INFO_DRAWER_HANDLER_KEY]) {
+        return;
+    }
+
+    const handler = (event) => {
+        handleWorldInfoDrawerToggleClick(event);
+    };
+
+    extensionState[WORLD_INFO_DRAWER_HANDLER_KEY] = handler;
+    document.addEventListener('click', handler, true);
+}
+
+function applyWorldInfoLazySelect2Optimization() {
+    if (extensionState[WORLD_INFO_LAZY_SELECT2_PATCH_KEY]) {
+        return;
+    }
+
+    const originalSelect2 = globalThis.jQuery?.fn?.select2;
+
+    if (typeof originalSelect2 !== 'function') {
+        console.warn(`${LOG_PREFIX} Select2 is unavailable; World Info lazy select2 optimization was not installed`);
+        return;
+    }
+
+    function patchedSelect2(...args) {
+        if (!shouldAttemptWorldInfoLazySelect2(args)) {
+            return originalSelect2.apply(this, args);
+        }
+
+        const elements = this.toArray();
+
+        if (!elements.some(element => shouldDeferWorldInfoSelect2(element))) {
+            return originalSelect2.apply(this, args);
+        }
+
+        elements.forEach(element => {
+            const control = $(element);
+
+            if (shouldDeferWorldInfoSelect2(element)) {
+                deferWorldInfoSelect2(element, args, originalSelect2);
+            } else {
+                originalSelect2.apply(control, args);
+            }
+        });
+
+        return this;
+    }
+
+    patchedSelect2.__baiBaiToolkitWorldInfoLazySelect2Patched = true;
+    patchedSelect2.__baiBaiToolkitOriginalSelect2 = originalSelect2;
+    Object.assign(patchedSelect2, originalSelect2);
+    globalThis.jQuery.fn.select2 = patchedSelect2;
+    extensionState[WORLD_INFO_LAZY_SELECT2_PATCH_KEY] = true;
+}
+
+function applyWorldInfoCharacterFilterOptionsOptimization() {
+    if (extensionState[WORLD_INFO_CHARACTER_FILTER_APPEND_PATCH_KEY]) {
+        return;
+    }
+
+    const originalAppend = globalThis.jQuery?.fn?.append;
+
+    if (typeof originalAppend !== 'function') {
+        console.warn(`${LOG_PREFIX} jQuery.append is unavailable; World Info character filter option optimization was not installed`);
+        return;
+    }
+
+    function patchedAppend(...args) {
+        if (shouldDeferWorldInfoCharacterFilterAppend(this, args)) {
+            deferWorldInfoCharacterFilterOption(this[0], args[0]);
+            return this;
+        }
+
+        return originalAppend.apply(this, args);
+    }
+
+    patchedAppend.__baiBaiToolkitWorldInfoCharacterFilterAppendPatched = true;
+    patchedAppend.__baiBaiToolkitOriginalAppend = originalAppend;
+    Object.assign(patchedAppend, originalAppend);
+    globalThis.jQuery.fn.append = patchedAppend;
+    extensionState[WORLD_INFO_CHARACTER_FILTER_APPEND_PATCH_KEY] = true;
+}
+
+function shouldDeferWorldInfoCharacterFilterAppend(targets, args) {
+    if (!settings.worldInfoDrawerOptimizationEnabled) {
+        return false;
+    }
+
+    if (targets.length !== 1 || args.length !== 1) {
+        return false;
+    }
+
+    const element = targets[0];
+    const option = args[0];
+
+    return element instanceof HTMLSelectElement
+        && option instanceof HTMLOptionElement
+        && element.matches('#world_popup_entries_list .world_entry_edit select[name="characterFilter"]')
+        && element.dataset[WORLD_INFO_LAZY_SELECT2_DATASET_KEY] === 'true';
+}
+
+function deferWorldInfoCharacterFilterOption(select, option) {
+    extensionState.worldInfoDeferredCharacterFilterOptions ??= new WeakMap();
+
+    const options = extensionState.worldInfoDeferredCharacterFilterOptions.get(select) ?? [];
+    options.push(option);
+    extensionState.worldInfoDeferredCharacterFilterOptions.set(select, options);
+    select.dataset[WORLD_INFO_DEFERRED_OPTIONS_DATASET_KEY] = 'true';
+}
+
+function initializeDeferredWorldInfoCharacterFilterOptions(select) {
+    const options = extensionState.worldInfoDeferredCharacterFilterOptions?.get(select);
+
+    if (!options?.length) {
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    for (const option of options) {
+        fragment.append(option);
+    }
+
+    extensionState.worldInfoDeferredCharacterFilterOptions.delete(select);
+    delete select.dataset[WORLD_INFO_DEFERRED_OPTIONS_DATASET_KEY];
+    select.append(fragment);
+}
+
+function shouldAttemptWorldInfoLazySelect2(args) {
+    if (!settings.worldInfoDrawerOptimizationEnabled) {
+        return false;
+    }
+
+    const firstArg = args[0];
+    return typeof firstArg === 'object' && firstArg !== null && !Array.isArray(firstArg);
+}
+
+function shouldDeferWorldInfoSelect2(element) {
+    if (!(element instanceof HTMLSelectElement)) {
+        return false;
+    }
+
+    if (!element.matches(WORLD_INFO_LAZY_SELECT2_SELECTOR)) {
+        return false;
+    }
+
+    if ($(element).data('select2')) {
+        return false;
+    }
+
+    return element.dataset[WORLD_INFO_LAZY_SELECT2_DATASET_KEY] !== 'true';
+}
+
+function deferWorldInfoSelect2(element, args, originalSelect2) {
+    element.dataset[WORLD_INFO_LAZY_SELECT2_DATASET_KEY] = 'true';
+    element.classList.add('bai-bai-toolkit-lazy-select2');
+
+    const state = {
+        args: [...args],
+        originalSelect2,
+    };
+
+    const activate = (event) => {
+        initializeDeferredWorldInfoSelect2(element, { open: event?.type === 'pointerdown' || event?.type === 'mousedown' });
+    };
+
+    state.activate = activate;
+    extensionState.worldInfoLazySelect2State ??= new WeakMap();
+    extensionState.worldInfoLazySelect2State.set(element, state);
+
+    element.addEventListener('pointerdown', activate, { capture: true });
+    element.addEventListener('mousedown', activate, { capture: true });
+    element.addEventListener('focus', activate, { capture: true });
+}
+
+function initializeDeferredWorldInfoSelect2(target, { open = false } = {}) {
+    const elements = target instanceof Element
+        ? [target]
+        : Array.from(target.querySelectorAll?.(`select[data-${toKebabCase(WORLD_INFO_LAZY_SELECT2_DATASET_KEY)}="true"]`) ?? []);
+
+    for (const element of elements) {
+        const state = extensionState.worldInfoLazySelect2State?.get(element);
+
+        if (!state) {
+            continue;
+        }
+
+        element.removeEventListener('pointerdown', state.activate, true);
+        element.removeEventListener('mousedown', state.activate, true);
+        element.removeEventListener('focus', state.activate, true);
+        delete element.dataset[WORLD_INFO_LAZY_SELECT2_DATASET_KEY];
+        element.classList.remove('bai-bai-toolkit-lazy-select2');
+        extensionState.worldInfoLazySelect2State.delete(element);
+
+        initializeDeferredWorldInfoCharacterFilterOptions(element);
+        state.originalSelect2.apply($(element), state.args);
+
+        if (open && $(element).data('select2')) {
+            setTimeout(() => {
+                try {
+                    $(element).select2('open');
+                } catch {
+                    // Ignore controls that were detached while the open was queued.
+                }
+            }, 0);
+        }
+    }
+}
+
+function toKebabCase(value) {
+    return String(value).replace(/[A-Z]/g, match => `-${match.toLowerCase()}`);
+}
+
+function handleWorldInfoDrawerToggleClick(event) {
+    if (!settings.worldInfoDrawerOptimizationEnabled) {
+        return;
+    }
+
+    const target = event.target instanceof Element ? event.target : null;
+    const toggle = target?.closest(WORLD_INFO_ENTRY_DRAWER_TOGGLE_SELECTOR);
+
+    if (!target || !toggle || !toggle.contains(target)) {
+        return;
+    }
+
+    if (target.classList.contains('text_pole')) {
+        return;
+    }
+
+    const drawer = toggle.closest(WORLD_INFO_ENTRY_DRAWER_SELECTOR);
+    const icon = drawer?.querySelector(':scope > .inline-drawer-header .inline-drawer-icon');
+    const content = drawer?.querySelector(':scope > .inline-drawer-content');
+
+    if (!drawer || !icon || !content) {
+        return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    $(content).stop(true, true);
+
+    const expand = getComputedStyle(content).display === 'none';
+
+    icon.classList.toggle('down', !expand);
+    icon.classList.toggle('up', expand);
+    icon.classList.toggle('fa-circle-chevron-down', !expand);
+    icon.classList.toggle('fa-circle-chevron-up', expand);
+
+    if (expand && !content.querySelector(':scope > .world_entry_edit')) {
+        $(drawer).trigger('inline-drawer-toggle');
+    }
+
+    content.style.display = expand ? 'block' : 'none';
+    content.style.height = '';
+
+    if (!CSS.supports('field-sizing', 'content')) {
+        content.querySelectorAll('textarea.autoSetHeight').forEach(textarea => {
+            void resetScrollHeight(textarea);
+        });
+    }
 }
 
 function applyPresetToggleOptimization() {
