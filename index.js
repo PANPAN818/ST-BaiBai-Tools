@@ -31,9 +31,13 @@ const PRESET_SAVE_HANDLER_KEY = '__baiBaiToolkitPresetSaveHandler';
 const CHAT_DELETE_EDIT_HANDLER_KEY = '__baiBaiToolkitChatDeleteEditHandler';
 const CHAT_DELETE_MESSAGE_DELETED_HANDLER_KEY = '__baiBaiToolkitChatDeleteMessageDeletedHandler';
 const CHAT_DELETE_GENERATION_ACTION_HANDLER_KEY = '__baiBaiToolkitChatDeleteGenerationActionHandler';
+const MOBILE_AUTO_KEYBOARD_HANDLER_KEY = '__baiBaiToolkitMobileAutoKeyboardHandler';
+const MOBILE_AUTO_KEYBOARD_FOCUS_PATCH_KEY = '__baiBaiToolkitMobileAutoKeyboardFocusPatched';
 const CHAT_DELETE_EDIT_WINDOW_MS = 5000;
+const MOBILE_AUTO_KEYBOARD_DIRECT_FOCUS_WINDOW_MS = 1500;
 const CHAT_GENERATION_ACTION_SELECTOR = '#send_but, #option_regenerate, #option_continue, #option_impersonate, #mes_continue, #mes_impersonate';
 const CHAT_MESSAGE_EDIT_SELECTOR = '#chat .mes_edit';
+const MOBILE_AUTO_KEYBOARD_TARGET_SELECTOR = '#curEditTextarea, #select_chat_search';
 const WORLD_INFO_DRAWER_HANDLER_KEY = '__baiBaiToolkitWorldInfoDrawerHandler';
 const WORLD_INFO_LAZY_SELECT2_PATCH_KEY = '__baiBaiToolkitWorldInfoLazySelect2Patched';
 const WORLD_INFO_CHARACTER_FILTER_APPEND_PATCH_KEY = '__baiBaiToolkitWorldInfoCharacterFilterAppendPatched';
@@ -82,6 +86,7 @@ const defaultSettings = {
     saveRequestGzipEnabled: true,
     chatListScrollOptimizationEnabled: true,
     chatListAutoClearEnabled: true,
+    mobileAutoKeyboardSuppressionEnabled: true,
     presetScrollOptimizationEnabled: true,
     presetSwitchOptimizationEnabled: true,
     presetToggleOptimizationEnabled: true,
@@ -476,6 +481,14 @@ async function renderSettingsPanel() {
             saveExtensionSettings();
         });
 
+    $('#bai_bai_toolkit_mobile_auto_keyboard_suppression_enabled')
+        .prop('checked', settings.mobileAutoKeyboardSuppressionEnabled)
+        .on('input', function () {
+            settings.mobileAutoKeyboardSuppressionEnabled = Boolean($(this).prop('checked'));
+            saveExtensionSettings();
+            applyMobileAutoKeyboardSuppression();
+        });
+
     $('#bai_bai_toolkit_chat_delete_edit_flow_optimization_enabled')
         .prop('checked', settings.chatDeleteEditFlowOptimizationEnabled)
         .on('input', function () {
@@ -602,6 +615,7 @@ function applyFeatureSettings() {
     applyPresetToggleOptimization();
     applyPresetSaveOptimization();
     applyChatDeleteEditFlowOptimization();
+    applyMobileAutoKeyboardSuppression();
 }
 
 function applyChatDeleteEditFlowOptimization() {
@@ -626,6 +640,113 @@ function applyChatDeleteEditFlowOptimization() {
     document.addEventListener('click', clickHandler, true);
     document.addEventListener('click', generationActionHandler, true);
     eventSource.on(event_types.MESSAGE_DELETED, messageDeletedHandler);
+}
+
+function applyMobileAutoKeyboardSuppression() {
+    patchMobileAutoKeyboardFocus();
+
+    if (extensionState[MOBILE_AUTO_KEYBOARD_HANDLER_KEY]) {
+        return;
+    }
+
+    const directFocusIntentHandler = (event) => {
+        markMobileAutoKeyboardDirectFocusIntent(event);
+    };
+    const focusInHandler = (event) => {
+        handleMobileAutoKeyboardFocusIn(event);
+    };
+
+    extensionState[MOBILE_AUTO_KEYBOARD_HANDLER_KEY] = {
+        directFocusIntentHandler,
+        focusInHandler,
+    };
+
+    document.addEventListener('pointerdown', directFocusIntentHandler, true);
+    document.addEventListener('mousedown', directFocusIntentHandler, true);
+    document.addEventListener('touchstart', directFocusIntentHandler, true);
+    document.addEventListener('focusin', focusInHandler, true);
+}
+
+function patchMobileAutoKeyboardFocus() {
+    const originalFocus = HTMLElement.prototype.focus;
+
+    if (typeof originalFocus !== 'function' || originalFocus[MOBILE_AUTO_KEYBOARD_FOCUS_PATCH_KEY]) {
+        return;
+    }
+
+    function guardedFocus(...args) {
+        if (shouldSuppressMobileAutoKeyboardFocus(this)) {
+            return undefined;
+        }
+
+        return originalFocus.apply(this, args);
+    }
+
+    guardedFocus[MOBILE_AUTO_KEYBOARD_FOCUS_PATCH_KEY] = true;
+    guardedFocus.__baiBaiToolkitOriginalFocus = originalFocus;
+    HTMLElement.prototype.focus = guardedFocus;
+}
+
+function markMobileAutoKeyboardDirectFocusIntent(event) {
+    if (!settings.mobileAutoKeyboardSuppressionEnabled || !isMobile()) {
+        return;
+    }
+
+    const target = event.target instanceof Element
+        ? event.target.closest(MOBILE_AUTO_KEYBOARD_TARGET_SELECTOR)
+        : null;
+
+    if (!(target instanceof HTMLElement)) {
+        return;
+    }
+
+    extensionState.mobileAutoKeyboardDirectFocusTarget = target;
+    extensionState.mobileAutoKeyboardDirectFocusAt = Date.now();
+}
+
+function handleMobileAutoKeyboardFocusIn(event) {
+    const target = event.target;
+
+    if (!(target instanceof HTMLElement) || !shouldSuppressMobileAutoKeyboardFocus(target)) {
+        return;
+    }
+
+    blurMobileAutoKeyboardTarget(target);
+}
+
+function blurMobileAutoKeyboardTarget(target) {
+    if (document.activeElement === target) {
+        target.blur();
+    }
+
+    const blurAgain = () => {
+        if (document.activeElement === target && shouldSuppressMobileAutoKeyboardFocus(target)) {
+            target.blur();
+        }
+    };
+
+    if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(blurAgain);
+    } else {
+        setTimeout(blurAgain, 0);
+    }
+}
+
+function shouldSuppressMobileAutoKeyboardFocus(element) {
+    return Boolean(
+        settings.mobileAutoKeyboardSuppressionEnabled
+        && isMobile()
+        && element instanceof HTMLElement
+        && element.matches(MOBILE_AUTO_KEYBOARD_TARGET_SELECTOR)
+        && !isRecentMobileAutoKeyboardDirectFocusIntent(element),
+    );
+}
+
+function isRecentMobileAutoKeyboardDirectFocusIntent(element) {
+    return Boolean(
+        extensionState.mobileAutoKeyboardDirectFocusTarget === element
+        && Date.now() - Number(extensionState.mobileAutoKeyboardDirectFocusAt || 0) <= MOBILE_AUTO_KEYBOARD_DIRECT_FOCUS_WINDOW_MS,
+    );
 }
 
 function handleChatDeleteEditFlowClick(event) {
