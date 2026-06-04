@@ -16,6 +16,7 @@ const SETTINGS_KEY = 'baiBaiToolkit';
 const EXTENSION_KEY = '__baiBaiToolkitExtensionInstalled';
 const FAST_CHAT_SEARCH_FETCH_KEY = '__baiBaiToolkitFastChatSearchFetchPatched';
 const FAST_CHAT_LIST_SCROLL_STYLE_ID = 'bai_bai_toolkit_fast_chat_list_scroll_style';
+const TEXTAREA_SCROLL_OPTIMIZATION_STYLE_ID = 'bai_bai_toolkit_textarea_scroll_style';
 const PRESET_SCROLL_STYLE_ID = 'bai_bai_toolkit_preset_scroll_style';
 const PRESET_SWITCH_BEFORE_HANDLER_KEY = '__baiBaiToolkitPresetSwitchBeforeHandler';
 const PRESET_SWITCH_HANDLER_KEY = '__baiBaiToolkitPresetSwitchHandler';
@@ -33,6 +34,7 @@ const OPENAI_PRESET_SELECT_SELECTOR = '#settings_preset_openai';
 const OPENAI_PRESET_DELETE_SELECTOR = '#delete_oai_preset';
 const PRESET_PROMPT_MANAGER_LIST_SELECTOR = '#completion_prompt_manager_list';
 const PRESET_PROMPT_MANAGER_SAVE_SELECTOR = '#completion_prompt_manager_popup_entry_form_save';
+const DESCRIPTION_TEXTAREA_SELECTOR = '#description_textarea, textarea.maximized_textarea[data-for="description_textarea"]';
 const WORLD_INFO_ENTRY_DRAWER_TOGGLE_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer > .inline-drawer-header .inline-drawer-toggle';
 const WORLD_INFO_ENTRY_DRAWER_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer';
 const WORLD_INFO_LAZY_SELECT2_SELECTOR = '#world_popup_entries_list .world_entry_edit select[name="characterFilter"], #world_popup_entries_list .world_entry_edit select[name="triggers"]';
@@ -59,6 +61,8 @@ const FORCE_TOGGLE_PROMPTS = new Set([
 ]);
 const defaultSettings = {
     resizeGuardEnabled: true,
+    textareaScrollOptimizationEnabled: true,
+    imeCommitOptimizationEnabled: true,
     worldInfoDrawerOptimizationEnabled: true,
     fastChatListEnabled: true,
     chatListScrollOptimizationEnabled: true,
@@ -151,6 +155,22 @@ async function renderSettingsPanel() {
             applyFeatureSettings();
         });
 
+    $('#bai_bai_toolkit_textarea_scroll_optimization_enabled')
+        .prop('checked', settings.textareaScrollOptimizationEnabled)
+        .on('input', function () {
+            settings.textareaScrollOptimizationEnabled = Boolean($(this).prop('checked'));
+            saveExtensionSettings();
+            applyTextareaScrollOptimization();
+        });
+
+    $('#bai_bai_toolkit_ime_commit_optimization_enabled')
+        .prop('checked', settings.imeCommitOptimizationEnabled)
+        .on('input', function () {
+            settings.imeCommitOptimizationEnabled = Boolean($(this).prop('checked'));
+            saveExtensionSettings();
+            applyImeCommitOptimization();
+        });
+
     $('#bai_bai_toolkit_world_info_drawer_optimization_enabled')
         .prop('checked', settings.worldInfoDrawerOptimizationEnabled)
         .on('input', function () {
@@ -225,6 +245,8 @@ function applyFeatureSettings() {
     applyWorldInfoDrawerOptimization();
     applyWorldInfoLazySelect2Optimization();
     applyWorldInfoCharacterFilterOptionsOptimization();
+    applyTextareaScrollOptimization();
+    applyImeCommitOptimization();
     applyPresetScrollOptimization();
     applyPresetSwitchOptimization();
     applyPresetToggleOptimization();
@@ -1361,6 +1383,135 @@ function updatePromptManagerTokenDisplay() {
     if (totalContainer && totalLabel) {
         totalContainer.replaceChildren(totalLabel, document.createTextNode(` ${promptManager.tokenUsage ?? 0} `));
     }
+}
+
+function applyTextareaScrollOptimization() {
+    if (settings.textareaScrollOptimizationEnabled) {
+        patchAutoCompleteFloatingPositioning();
+        applyTextareaScrollOptimizationStyle();
+    } else {
+        restoreAutoCompleteFloatingPositioning();
+        removeTextareaScrollOptimizationStyle();
+    }
+}
+
+function patchAutoCompleteFloatingPositioning() {
+    const originalUpdateFloatingPosition = AutoComplete.prototype.updateFloatingPosition;
+
+    if (typeof originalUpdateFloatingPosition !== 'function' || originalUpdateFloatingPosition.__mobileTextareaScrollPatched) {
+        return;
+    }
+
+    function guardedUpdateFloatingPosition(...args) {
+        if (!this.isActive) {
+            return;
+        }
+
+        return originalUpdateFloatingPosition.apply(this, args);
+    }
+
+    guardedUpdateFloatingPosition.__mobileTextareaScrollPatched = true;
+    guardedUpdateFloatingPosition.__mobileTextareaScrollOriginal = originalUpdateFloatingPosition;
+    extensionState.originalAutoCompleteUpdateFloatingPosition = originalUpdateFloatingPosition;
+    AutoComplete.prototype.updateFloatingPosition = guardedUpdateFloatingPosition;
+}
+
+function restoreAutoCompleteFloatingPositioning() {
+    const currentUpdateFloatingPosition = AutoComplete.prototype.updateFloatingPosition;
+
+    if (currentUpdateFloatingPosition?.__mobileTextareaScrollPatched) {
+        AutoComplete.prototype.updateFloatingPosition = currentUpdateFloatingPosition.__mobileTextareaScrollOriginal;
+    }
+}
+
+function applyTextareaScrollOptimizationStyle() {
+    let style = document.getElementById(TEXTAREA_SCROLL_OPTIMIZATION_STYLE_ID);
+
+    if (!style) {
+        style = document.createElement('style');
+        style.id = TEXTAREA_SCROLL_OPTIMIZATION_STYLE_ID;
+        document.head.append(style);
+    }
+
+    style.textContent = `
+@media screen and (max-width: 1000px) {
+    #description_textarea,
+    textarea.maximized_textarea[data-for="description_textarea"] {
+        text-shadow: none !important;
+        -webkit-overflow-scrolling: touch;
+    }
+}
+`;
+}
+
+function removeTextareaScrollOptimizationStyle() {
+    document.getElementById(TEXTAREA_SCROLL_OPTIMIZATION_STYLE_ID)?.remove();
+}
+
+function applyImeCommitOptimization() {
+    if (settings.imeCommitOptimizationEnabled) {
+        patchAutoCompleteShowForImeCommit();
+    } else {
+        restoreAutoCompleteShowForImeCommit();
+    }
+}
+
+function patchAutoCompleteShowForImeCommit() {
+    const originalShow = AutoComplete.prototype.show;
+
+    if (typeof originalShow !== 'function' || originalShow.__mobileImeCommitPatched) {
+        return;
+    }
+
+    async function guardedShow(isInput = false, isForced = false, isSelect = false) {
+        if (shouldSkipDescriptionAutoCompleteShow(this, isInput, isForced, isSelect)) {
+            this.text = this.textarea?.value ?? this.text;
+            return this.hide?.();
+        }
+
+        return originalShow.apply(this, arguments);
+    }
+
+    guardedShow.__mobileImeCommitPatched = true;
+    guardedShow.__mobileImeCommitOriginal = originalShow;
+    extensionState.originalAutoCompleteShow = originalShow;
+    AutoComplete.prototype.show = guardedShow;
+}
+
+function restoreAutoCompleteShowForImeCommit() {
+    const currentShow = AutoComplete.prototype.show;
+
+    if (currentShow?.__mobileImeCommitPatched) {
+        AutoComplete.prototype.show = currentShow.__mobileImeCommitOriginal;
+    }
+}
+
+function shouldSkipDescriptionAutoCompleteShow(autoComplete, isInput, isForced, isSelect) {
+    if (!settings.imeCommitOptimizationEnabled || !isInput || isForced || isSelect || autoComplete?.isActive) {
+        return false;
+    }
+
+    const textarea = autoComplete?.textarea;
+
+    if (!(textarea instanceof HTMLTextAreaElement) || !textarea.matches(DESCRIPTION_TEXTAREA_SELECTOR)) {
+        return false;
+    }
+
+    const cursorPosition = Number(textarea.selectionStart ?? 0);
+    const text = String(textarea.value ?? '');
+
+    if (cursorPosition >= 2 && text.slice(cursorPosition - 2, cursorPosition) === '{{') {
+        return false;
+    }
+
+    const beforeCursor = text.slice(Math.max(0, cursorPosition - 256), cursorPosition);
+    const lastOpenMacro = beforeCursor.lastIndexOf('{{');
+
+    if (lastOpenMacro !== -1 && beforeCursor.lastIndexOf('}}') < lastOpenMacro) {
+        return false;
+    }
+
+    return true;
 }
 
 function patchAutoCompletePositioning() {
