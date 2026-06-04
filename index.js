@@ -1,17 +1,16 @@
 import {
     characters,
-    createOrEditCharacter,
     event_types,
     eventSource,
     getCurrentChatId,
     getRequestHeaders,
-    messageEdit,
     openCharacterChat,
     saveSettingsDebounced,
     selectCharacterById,
     setActiveCharacter,
     this_chid,
 } from '../../../../script.js';
+import * as scriptModule from '../../../../script.js';
 import { AutoComplete } from '../../../autocomplete/AutoComplete.js';
 import { extension_settings, extensionTypes, renderExtensionTemplateAsync } from '../../../extensions.js';
 import { oai_settings, openai_setting_names, promptManager } from '../../../openai.js';
@@ -58,6 +57,10 @@ const WELCOME_RECENT_CHAT_SELECTOR = '#chat .welcomePanel .recentChat';
 const WELCOME_RECENT_CHAT_ACTION_SELECTOR = '.renameChat, .deleteChat, .pinChat, button, a, input, select, textarea';
 const MOBILE_MESSAGE_EDIT_SELECTOR = '#curEditTextarea, .reasoning_edit_textarea';
 const MOBILE_AUTO_KEYBOARD_TARGET_SELECTOR = '#curEditTextarea, #select_chat_search';
+const createOrEditCharacter = scriptModule.createOrEditCharacter;
+const messageEdit = scriptModule.messageEdit;
+const COMPATIBILITY_MODE_BADGE_TEXT = '（兼容模式）';
+const LOW_ST_VERSION_DISABLED_BADGE_TEXT = '（当前酒馆版本过低，请更新）';
 const WORLD_INFO_DRAWER_HANDLER_KEY = '__baiBaiToolkitWorldInfoDrawerHandler';
 const WORLD_INFO_LAZY_SELECT2_PATCH_KEY = '__baiBaiToolkitWorldInfoLazySelect2Patched';
 const WORLD_INFO_CHARACTER_FILTER_APPEND_PATCH_KEY = '__baiBaiToolkitWorldInfoCharacterFilterAppendPatched';
@@ -566,6 +569,68 @@ async function renderSettingsPanel() {
             settings.presetAutoSaveAfterPromptEditEnabled = Boolean($(this).prop('checked'));
             saveExtensionSettings();
         });
+
+    applyCompatibilityIndicators(container);
+}
+
+function applyCompatibilityIndicators(container) {
+    if (isWelcomeRecentChatDirectOpenCompatibilityMode()) {
+        markSettingCompatibility(
+            container,
+            '#bai_bai_toolkit_welcome_recent_chat_direct_open_enabled',
+            COMPATIBILITY_MODE_BADGE_TEXT,
+            false,
+            '当前酒馆版本未导出 createOrEditCharacter，已使用兼容模式。',
+        );
+    }
+
+    if (!isChatDeleteEditFlowSupported()) {
+        markSettingCompatibility(
+            container,
+            '#bai_bai_toolkit_chat_delete_edit_flow_optimization_enabled',
+            LOW_ST_VERSION_DISABLED_BADGE_TEXT,
+            true,
+            '当前酒馆版本未导出 messageEdit，请更新酒馆后使用。',
+        );
+    }
+}
+
+function markSettingCompatibility(container, inputSelector, badgeText, disabled, titleNote) {
+    const input = container.find(inputSelector);
+    const label = input.closest('label');
+    const text = label.find('span').first();
+
+    if (!input.length || !label.length || !text.length) {
+        return;
+    }
+
+    const badgeClass = `${input.attr('id')}_compat_badge`;
+    let badge = text.find(`.${badgeClass}`);
+
+    if (!badge.length) {
+        badge = $(`<small class="${badgeClass} bai_bai_toolkit_compat_badge"></small>`);
+        text.append(' ', badge);
+    }
+
+    badge
+        .text(badgeText)
+        .css({
+            opacity: 0.75,
+            'font-size': '0.9em',
+            'white-space': 'nowrap',
+        });
+
+    if (titleNote) {
+        const currentTitle = String(label.attr('title') || '');
+        if (!currentTitle.includes(titleNote)) {
+            label.attr('title', currentTitle ? `${currentTitle} ${titleNote}` : titleNote);
+        }
+    }
+
+    if (disabled) {
+        input.prop('checked', false).prop('disabled', true);
+        label.css('opacity', 0.65);
+    }
 }
 
 async function initializeUpdateUI(container) {
@@ -658,7 +723,20 @@ function applyFeatureSettings() {
     applyMobileMessageEditScrollGuard();
 }
 
+function isWelcomeRecentChatDirectOpenCompatibilityMode() {
+    return typeof createOrEditCharacter !== 'function';
+}
+
+function isChatDeleteEditFlowSupported() {
+    return typeof messageEdit === 'function';
+}
+
 function applyChatDeleteEditFlowOptimization() {
+    if (!isChatDeleteEditFlowSupported()) {
+        endChatDeleteEditWindow();
+        return;
+    }
+
     if (extensionState[CHAT_DELETE_EDIT_HANDLER_KEY]) {
         return;
     }
@@ -816,7 +894,11 @@ async function openWelcomeRecentCharacterChatDirectly(characterId, avatarId, fil
         }
 
         if (previousChat !== fileName) {
-            await createOrEditCharacter(new CustomEvent('newChat'));
+            if (typeof createOrEditCharacter === 'function') {
+                await createOrEditCharacter(new CustomEvent('newChat'));
+            } else {
+                await openCharacterChat(fileName);
+            }
         }
     } catch (error) {
         console.error(`${LOG_PREFIX} Error opening recent chat`, error);
@@ -1237,7 +1319,7 @@ function isRecentMobileAutoKeyboardDirectFocusIntent(element) {
 }
 
 function handleChatDeleteEditFlowClick(event) {
-    if (!settings.chatDeleteEditFlowOptimizationEnabled) {
+    if (!settings.chatDeleteEditFlowOptimizationEnabled || !isChatDeleteEditFlowSupported()) {
         endChatDeleteEditWindow();
         return;
     }
@@ -1310,6 +1392,10 @@ function isChatDeleteEditWindowActive() {
 }
 
 async function openMessageEditorDuringDeleteFlow(messageId) {
+    if (!isChatDeleteEditFlowSupported()) {
+        return;
+    }
+
     try {
         await messageEdit(messageId);
         const editor = document.querySelector('#curEditTextarea');
@@ -1325,7 +1411,7 @@ async function openMessageEditorDuringDeleteFlow(messageId) {
 }
 
 function handleChatGenerationActionClick(event) {
-    if (!settings.chatDeleteEditFlowOptimizationEnabled || extensionState.chatDeleteEditReplayingAction) {
+    if (!settings.chatDeleteEditFlowOptimizationEnabled || !isChatDeleteEditFlowSupported() || extensionState.chatDeleteEditReplayingAction) {
         return;
     }
 
