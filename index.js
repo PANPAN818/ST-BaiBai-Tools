@@ -34,10 +34,6 @@ const OPENAI_PRESET_SELECT_SELECTOR = '#settings_preset_openai';
 const OPENAI_PRESET_DELETE_SELECTOR = '#delete_oai_preset';
 const PRESET_PROMPT_MANAGER_LIST_SELECTOR = '#completion_prompt_manager_list';
 const PRESET_PROMPT_MANAGER_SAVE_SELECTOR = '#completion_prompt_manager_popup_entry_form_save';
-const DESCRIPTION_TEXTAREA_SELECTOR = '#description_textarea, textarea.maximized_textarea[data-for="description_textarea"]';
-const DESCRIPTION_INPUT_DEFER_MIN_LENGTH = 2000;
-const DESCRIPTION_INPUT_DEFER_DELAY = 160;
-const DEFERRED_DESCRIPTION_INPUT_KEY = '__baiBaiToolkitDeferredDescriptionInput';
 const WORLD_INFO_ENTRY_DRAWER_TOGGLE_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer > .inline-drawer-header .inline-drawer-toggle';
 const WORLD_INFO_ENTRY_DRAWER_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer';
 const WORLD_INFO_LAZY_SELECT2_SELECTOR = '#world_popup_entries_list .world_entry_edit select[name="characterFilter"], #world_popup_entries_list .world_entry_edit select[name="triggers"]';
@@ -65,7 +61,6 @@ const FORCE_TOGGLE_PROMPTS = new Set([
 const defaultSettings = {
     resizeGuardEnabled: true,
     textareaScrollOptimizationEnabled: true,
-    imeCommitOptimizationEnabled: true,
     worldInfoDrawerOptimizationEnabled: true,
     fastChatListEnabled: true,
     chatListScrollOptimizationEnabled: true,
@@ -74,6 +69,9 @@ const defaultSettings = {
     presetSwitchOptimizationEnabled: true,
     presetToggleOptimizationEnabled: true,
 };
+const legacySettingsKeys = [
+    'imeCommitOptimizationEnabled',
+];
 const settings = { ...defaultSettings };
 let fastChatListRequestId = 0;
 
@@ -119,6 +117,15 @@ function initializeSettings() {
         extension_settings[SETTINGS_KEY] = {};
     }
 
+    let removedLegacySetting = false;
+
+    for (const key of legacySettingsKeys) {
+        if (Object.prototype.hasOwnProperty.call(extension_settings[SETTINGS_KEY], key)) {
+            delete extension_settings[SETTINGS_KEY][key];
+            removedLegacySetting = true;
+        }
+    }
+
     for (const [key, value] of Object.entries(defaultSettings)) {
         if (typeof extension_settings[SETTINGS_KEY][key] !== typeof value) {
             extension_settings[SETTINGS_KEY][key] = value;
@@ -126,6 +133,10 @@ function initializeSettings() {
     }
 
     Object.assign(settings, defaultSettings, extension_settings[SETTINGS_KEY]);
+
+    if (removedLegacySetting) {
+        saveSettingsDebounced();
+    }
 }
 
 function saveExtensionSettings() {
@@ -164,14 +175,6 @@ async function renderSettingsPanel() {
             settings.textareaScrollOptimizationEnabled = Boolean($(this).prop('checked'));
             saveExtensionSettings();
             applyTextareaScrollOptimization();
-        });
-
-    $('#bai_bai_toolkit_ime_commit_optimization_enabled')
-        .prop('checked', settings.imeCommitOptimizationEnabled)
-        .on('input', function () {
-            settings.imeCommitOptimizationEnabled = Boolean($(this).prop('checked'));
-            saveExtensionSettings();
-            applyImeCommitOptimization();
         });
 
     $('#bai_bai_toolkit_world_info_drawer_optimization_enabled')
@@ -249,7 +252,6 @@ function applyFeatureSettings() {
     applyWorldInfoLazySelect2Optimization();
     applyWorldInfoCharacterFilterOptionsOptimization();
     applyTextareaScrollOptimization();
-    applyImeCommitOptimization();
     applyPresetScrollOptimization();
     applyPresetSwitchOptimization();
     applyPresetToggleOptimization();
@@ -1449,165 +1451,6 @@ function applyTextareaScrollOptimizationStyle() {
 
 function removeTextareaScrollOptimizationStyle() {
     document.getElementById(TEXTAREA_SCROLL_OPTIMIZATION_STYLE_ID)?.remove();
-}
-
-function applyImeCommitOptimization() {
-    if (settings.imeCommitOptimizationEnabled) {
-        patchAutoCompleteShowForImeCommit();
-        installImeCommitInputDeferral();
-    } else {
-        restoreAutoCompleteShowForImeCommit();
-        uninstallImeCommitInputDeferral();
-    }
-}
-
-function installImeCommitInputDeferral() {
-    if (extensionState.imeCommitInputDeferralHandler) {
-        return;
-    }
-
-    const inputHandler = event => handleDescriptionInputCapture(event);
-    const flushHandler = event => flushDeferredDescriptionInput(event.target);
-
-    document.addEventListener('input', inputHandler, true);
-    document.addEventListener('focusout', flushHandler, true);
-    extensionState.imeCommitInputDeferralHandler = inputHandler;
-    extensionState.imeCommitInputDeferralFlushHandler = flushHandler;
-}
-
-function uninstallImeCommitInputDeferral() {
-    if (extensionState.imeCommitInputDeferralHandler) {
-        document.removeEventListener('input', extensionState.imeCommitInputDeferralHandler, true);
-        delete extensionState.imeCommitInputDeferralHandler;
-    }
-
-    if (extensionState.imeCommitInputDeferralFlushHandler) {
-        document.removeEventListener('focusout', extensionState.imeCommitInputDeferralFlushHandler, true);
-        delete extensionState.imeCommitInputDeferralFlushHandler;
-    }
-
-    clearDeferredDescriptionInput();
-}
-
-function handleDescriptionInputCapture(event) {
-    if (event[DEFERRED_DESCRIPTION_INPUT_KEY] || !shouldDeferDescriptionInput(event)) {
-        return;
-    }
-
-    event.stopImmediatePropagation();
-    scheduleDeferredDescriptionInput(event.target);
-}
-
-function shouldDeferDescriptionInput(event) {
-    if (!settings.imeCommitOptimizationEnabled || !isMobile() || event.isTrusted !== true) {
-        return false;
-    }
-
-    const textarea = event.target;
-
-    if (!isDescriptionTextarea(textarea)) {
-        return false;
-    }
-
-    if (String(textarea.value ?? '').length < DESCRIPTION_INPUT_DEFER_MIN_LENGTH) {
-        return false;
-    }
-
-    return !isLikelyDescriptionMacroContext(textarea);
-}
-
-function scheduleDeferredDescriptionInput(textarea) {
-    clearDeferredDescriptionInput();
-    extensionState.deferredDescriptionInputTarget = textarea;
-    extensionState.deferredDescriptionInputTimer = setTimeout(() => {
-        flushDeferredDescriptionInput(textarea);
-    }, DESCRIPTION_INPUT_DEFER_DELAY);
-}
-
-function clearDeferredDescriptionInput() {
-    if (extensionState.deferredDescriptionInputTimer) {
-        clearTimeout(extensionState.deferredDescriptionInputTimer);
-        delete extensionState.deferredDescriptionInputTimer;
-    }
-}
-
-function flushDeferredDescriptionInput(target = extensionState.deferredDescriptionInputTarget) {
-    if (!isDescriptionTextarea(target)) {
-        return;
-    }
-
-    clearDeferredDescriptionInput();
-    delete extensionState.deferredDescriptionInputTarget;
-
-    const deferredEvent = new Event('input', { bubbles: true });
-    Object.defineProperty(deferredEvent, DEFERRED_DESCRIPTION_INPUT_KEY, { value: true });
-    target.dispatchEvent(deferredEvent);
-}
-
-function patchAutoCompleteShowForImeCommit() {
-    const originalShow = AutoComplete.prototype.show;
-
-    if (typeof originalShow !== 'function' || originalShow.__mobileImeCommitPatched) {
-        return;
-    }
-
-    async function guardedShow(isInput = false, isForced = false, isSelect = false) {
-        if (shouldSkipDescriptionAutoCompleteShow(this, isInput, isForced, isSelect)) {
-            this.text = this.textarea?.value ?? this.text;
-            return this.hide?.();
-        }
-
-        return originalShow.apply(this, arguments);
-    }
-
-    guardedShow.__mobileImeCommitPatched = true;
-    guardedShow.__mobileImeCommitOriginal = originalShow;
-    extensionState.originalAutoCompleteShow = originalShow;
-    AutoComplete.prototype.show = guardedShow;
-}
-
-function restoreAutoCompleteShowForImeCommit() {
-    const currentShow = AutoComplete.prototype.show;
-
-    if (currentShow?.__mobileImeCommitPatched) {
-        AutoComplete.prototype.show = currentShow.__mobileImeCommitOriginal;
-    }
-}
-
-function shouldSkipDescriptionAutoCompleteShow(autoComplete, isInput, isForced, isSelect) {
-    if (!settings.imeCommitOptimizationEnabled || !isInput || isForced || isSelect || autoComplete?.isActive) {
-        return false;
-    }
-
-    const textarea = autoComplete?.textarea;
-
-    if (!isDescriptionTextarea(textarea)) {
-        return false;
-    }
-
-    return !isLikelyDescriptionMacroContext(textarea);
-}
-
-function isDescriptionTextarea(textarea) {
-    return textarea instanceof HTMLTextAreaElement && textarea.matches(DESCRIPTION_TEXTAREA_SELECTOR);
-}
-
-function isLikelyDescriptionMacroContext(textarea) {
-    const cursorPosition = Number(textarea.selectionStart ?? 0);
-    const text = String(textarea.value ?? '');
-
-    if (cursorPosition >= 2 && text.slice(cursorPosition - 2, cursorPosition) === '{{') {
-        return true;
-    }
-
-    const beforeCursor = text.slice(Math.max(0, cursorPosition - 256), cursorPosition);
-    const lastOpenMacro = beforeCursor.lastIndexOf('{{');
-
-    if (lastOpenMacro !== -1 && beforeCursor.lastIndexOf('}}') < lastOpenMacro) {
-        return true;
-    }
-
-    return false;
 }
 
 function patchAutoCompletePositioning() {
