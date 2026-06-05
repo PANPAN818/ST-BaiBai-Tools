@@ -44,6 +44,28 @@
                     <input id="bai_bai_toolkit_save_request_gzip_enabled" type="checkbox" class="checkbox">
                     <span>聊天保存请求 Gzip 压缩</span>
                 </label>
+                <label class="checkbox_label" for="bai_bai_toolkit_translate_message_updated_optimization_enabled" title="自动翻译关闭且消息没有翻译缓存时，跳过翻译扩展在消息更新事件里的无效处理，避免长聊天反复全量保存。">
+                    <input id="bai_bai_toolkit_translate_message_updated_optimization_enabled" type="checkbox" class="checkbox">
+                    <span>翻译更新事件保存优化</span>
+                </label>
+                <label class="checkbox_label" for="bai_bai_toolkit_long_chat_dom_render_optimization_enabled" title="长聊天进入后自动滚到底部，并在当前聊天 DOM 文本量较大时为楼层启用 content-visibility 和缓存占位高度，减少屏幕外楼层重排绘制。">
+                    <input id="bai_bai_toolkit_long_chat_dom_render_optimization_enabled" type="checkbox" class="checkbox">
+                    <span>长聊天 DOM 渲染优化</span>
+                </label>
+                <div class="bai_bai_toolkit_perf_trace flex-container flexFlowColumn" hidden aria-hidden="true" style="display: none !important; gap: 6px; padding: 6px 5px;">
+                    <div class="flex-container alignItemCenter flexGap5">
+                        <span style="opacity: 0.8;">Performance trace</span>
+                        <div id="bai_bai_toolkit_perf_trace_start" class="menu_button menu_button_icon" title="Start recording filtered performance diagnostics.">
+                            <i class="fa-solid fa-circle-play"></i>
+                            <span>Start</span>
+                        </div>
+                        <div id="bai_bai_toolkit_perf_trace_stop" class="menu_button menu_button_icon disabled" title="Stop recording and export a txt diagnostics file.">
+                            <i class="fa-solid fa-file-export"></i>
+                            <span>Stop &amp; Export TXT</span>
+                        </div>
+                    </div>
+                    <small id="bai_bai_toolkit_perf_trace_status" style="opacity: 0.7;">idle</small>
+                </div>
                 <label class="checkbox_label" for="bai_bai_toolkit_chat_list_scroll_optimization_enabled" title="减少管理聊天文件列表屏幕外条目的布局和绘制，缓解大量聊天文件时的滚动卡顿。">
                     <input id="bai_bai_toolkit_chat_list_scroll_optimization_enabled" type="checkbox" class="checkbox">
                     <span>管理聊天文件滚动优化</span>

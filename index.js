@@ -30,6 +30,8 @@ const SETTINGS_KEY = 'baiBaiToolkit';
 const EXTENSION_KEY = '__baiBaiToolkitExtensionInstalled';
 const FAST_CHAT_SEARCH_FETCH_KEY = '__baiBaiToolkitFastChatSearchFetchPatched';
 const SAVE_REQUEST_GZIP_FETCH_KEY = '__baiBaiToolkitSaveRequestGzipFetchPatched';
+const PERFORMANCE_TRACE_FETCH_KEY = '__baiBaiToolkitPerformanceTraceFetchPatched';
+const TRANSLATE_MESSAGE_UPDATED_OPTIMIZATION_KEY = '__baiBaiToolkitTranslateMessageUpdatedOptimized';
 const CUSTOM_CSS_INPUT_OPTIMIZATION_KEY = '__baiBaiToolkitCustomCssInputOptimized';
 const CUSTOM_CSS_CODEMIRROR_EDITOR_KEY = '__baiBaiToolkitCustomCssCodeMirrorEditor';
 const PRESET_PROMPT_CODEMIRROR_EDITOR_KEY = '__baiBaiToolkitPresetPromptCodeMirrorEditor';
@@ -39,6 +41,7 @@ const CUSTOM_CSS_CODEMIRROR_EDITOR_STYLE_ID = 'bai_bai_toolkit_custom_css_codemi
 const PRESET_PROMPT_CODEMIRROR_EDITOR_STYLE_ID = 'bai_bai_toolkit_preset_prompt_codemirror_editor_style';
 const PRESET_SCROLL_STYLE_ID = 'bai_bai_toolkit_preset_scroll_style';
 const PRESET_DRAG_STYLE_ID = 'bai_bai_toolkit_preset_drag_style';
+const LONG_CHAT_DOM_RENDER_STYLE_ID = 'bai_bai_toolkit_long_chat_dom_render_style';
 const DESCRIPTION_CODEMIRROR_EDITOR_KEY = '__baiBaiToolkitDescriptionCodeMirrorEditor';
 const DESCRIPTION_CODEMIRROR_MODULES_KEY = '__baiBaiToolkitDescriptionCodeMirrorModules';
 const PRESET_DRAG_HANDLER_KEY = '__baiBaiToolkitPresetDragHandler';
@@ -59,6 +62,16 @@ const MOBILE_AUTO_KEYBOARD_FOCUS_PATCH_KEY = '__baiBaiToolkitMobileAutoKeyboardF
 const MOBILE_AUTO_KEYBOARD_JQUERY_FOCUS_PATCH_KEY = '__baiBaiToolkitMobileAutoKeyboardJQueryFocusPatched';
 const MOBILE_AUTO_KEYBOARD_JQUERY_TRIGGER_PATCH_KEY = '__baiBaiToolkitMobileAutoKeyboardJQueryTriggerPatched';
 const MOBILE_MESSAGE_EDIT_SCROLL_TOP_PATCH_KEY = '__baiBaiToolkitMessageEditScrollTopPatched';
+const LONG_CHAT_DOM_RENDER_TEXT_THRESHOLD = 60000;
+const LONG_CHAT_DOM_RENDER_SINGLE_MESSAGE_THRESHOLD = 12000;
+const LONG_CHAT_DOM_RENDER_MIN_TEXT_THRESHOLD = 24000;
+const LONG_CHAT_DOM_RENDER_MESSAGE_COUNT_THRESHOLD = 20;
+const LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_SETTLE_MS = 900;
+const LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_STABLE_FRAMES = 6;
+const LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_TOLERANCE = 8;
+const LONG_CHAT_DOM_RENDER_BOTTOM_ANCHOR_CLASS = 'bai-bai-toolkit-long-chat-bottom-anchor';
+const LONG_CHAT_DOM_RENDER_BOTTOM_ANCHORED_CLASS = 'bai-bai-toolkit-long-chat-bottom-anchored';
+const LONG_CHAT_DOM_RENDER_HEIGHT_VAR = '--bai-bai-toolkit-long-chat-mes-height';
 const CHAT_DELETE_EDIT_WINDOW_MS = 5000;
 const MOBILE_AUTO_KEYBOARD_DIRECT_FOCUS_WINDOW_MS = 1500;
 const MOBILE_MESSAGE_EDIT_SCROLL_RESTORE_TOLERANCE = 2;
@@ -146,7 +159,7 @@ const WORLD_INFO_LAZY_SELECT2_SELECTOR = '#world_popup_entries_list .world_entry
 const WORLD_INFO_LAZY_SELECT2_DATASET_KEY = 'baiBaiToolkitLazySelect2';
 const WORLD_INFO_DEFERRED_OPTIONS_DATASET_KEY = 'baiBaiToolkitDeferredOptions';
 const SILENT_UPDATE_STORAGE_KEY = 'bai_bai_toolkit_silent_update';
-const SILENT_UPDATE_INTERVAL_MS = 12 * 60 * 60 * 1000;
+const SILENT_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 const FORCE_EDIT_PROMPTS = new Set([
     'charDescription',
     'charPersonality',
@@ -170,6 +183,60 @@ const SAVE_REQUEST_GZIP_PATHS = new Set([
     '/api/chats/save',
     '/api/chats/group/save',
 ]);
+const PERFORMANCE_TRACE_FETCH_PATHS = new Set([
+    '/api/chats/get',
+    '/api/chats/group/get',
+    '/api/chats/save',
+    '/api/chats/group/save',
+    '/api/chats/search',
+    '/api/characters/chats',
+]);
+const PERFORMANCE_TRACE_MAX_LINES = 2000;
+const PERFORMANCE_TRACE_MAX_LINE_LENGTH = 700;
+const PERFORMANCE_TRACE_SLOW_MS = 16;
+const PERFORMANCE_TRACE_LISTENER_LOG_MS = 8;
+const PERFORMANCE_TRACE_DEDUPE_MS = 250;
+const PERFORMANCE_TRACE_EVENTS = new Set([
+    event_types.CHAT_LOADED,
+    event_types.CHAT_CHANGED,
+    event_types.MORE_MESSAGES_LOADED,
+    event_types.MESSAGE_SENT,
+    event_types.USER_MESSAGE_RENDERED,
+    event_types.MESSAGE_RECEIVED,
+    event_types.CHARACTER_MESSAGE_RENDERED,
+    event_types.MESSAGE_EDITED,
+    event_types.MESSAGE_UPDATED,
+    event_types.MESSAGE_DELETED,
+    event_types.MESSAGE_SWIPED,
+    event_types.MESSAGE_SWIPE_DELETED,
+    event_types.MESSAGE_FILE_EMBEDDED,
+    event_types.MESSAGE_REASONING_EDITED,
+    event_types.MESSAGE_REASONING_DELETED,
+    event_types.GENERATION_STARTED,
+    event_types.GENERATION_AFTER_COMMANDS,
+    event_types.GENERATE_BEFORE_COMBINE_PROMPTS,
+    event_types.GENERATE_AFTER_COMBINE_PROMPTS,
+    event_types.GENERATE_AFTER_DATA,
+    event_types.CHAT_COMPLETION_PROMPT_READY,
+    event_types.GENERATION_STOPPED,
+    event_types.GENERATION_ENDED,
+    event_types.IMPERSONATE_READY,
+].filter(Boolean));
+const PERFORMANCE_TRACE_INTERACTION_SELECTOR = [
+    '#send_but',
+    '#option_regenerate',
+    '#option_continue',
+    '#option_impersonate',
+    '#mes_continue',
+    '#mes_impersonate',
+    '#chat .mes_edit',
+    '#chat .mes_edit_done',
+    '#chat .mes_edit_cancel',
+    '#chat .swipe_left',
+    '#chat .swipe_right',
+    '#chat .mes_translate',
+    '#show_more_messages',
+].join(', ');
 const defaultSettings = {
     resizeGuardEnabled: true,
     descriptionCodeMirrorEditorEnabled: true,
@@ -178,6 +245,8 @@ const defaultSettings = {
     fastChatListEnabled: true,
     welcomeRecentChatDirectOpenEnabled: true,
     saveRequestGzipEnabled: true,
+    translateMessageUpdatedOptimizationEnabled: true,
+    longChatDomRenderOptimizationEnabled: true,
     chatListScrollOptimizationEnabled: true,
     chatListAutoClearEnabled: true,
     mobileAutoKeyboardSuppressionEnabled: true,
@@ -214,6 +283,7 @@ if (!extensionState.installed) {
 }
 
 installSaveRequestGzipFetchHook();
+installPerformanceTraceFetchHook();
 observeChatManagementPopupCleanup();
 applyFeatureSettings();
 jQuery(renderSettingsPanel);
@@ -275,6 +345,1184 @@ function initializeSettings() {
 function saveExtensionSettings() {
     Object.assign(extension_settings[SETTINGS_KEY], settings);
     saveSettingsDebounced();
+}
+
+function applyTranslateMessageUpdatedOptimization() {
+    if (settings.translateMessageUpdatedOptimizationEnabled) {
+        installTranslateMessageUpdatedOptimization();
+    } else {
+        restoreTranslateMessageUpdatedOptimization();
+    }
+}
+
+function getTranslateMessageUpdatedOptimizationState() {
+    if (!extensionState.translateMessageUpdatedOptimization || typeof extensionState.translateMessageUpdatedOptimization !== 'object') {
+        extensionState.translateMessageUpdatedOptimization = {};
+    }
+
+    return extensionState.translateMessageUpdatedOptimization;
+}
+
+function installTranslateMessageUpdatedOptimization() {
+    const listeners = eventSource?.events?.[event_types.MESSAGE_UPDATED];
+    const state = getTranslateMessageUpdatedOptimizationState();
+
+    if (!Array.isArray(listeners)) {
+        scheduleTranslateMessageUpdatedOptimizationRetry();
+        return;
+    }
+
+    let installed = 0;
+
+    for (let index = 0; index < listeners.length; index++) {
+        const listener = listeners[index];
+
+        if (listener?.[TRANSLATE_MESSAGE_UPDATED_OPTIMIZATION_KEY] || !isTranslateMessageUpdatedListener(listener)) {
+            continue;
+        }
+
+        const wrapped = async function baiBaiToolkitTranslateMessageUpdatedGuard(messageId, ...args) {
+            if (shouldSkipTranslateMessageUpdatedListener(messageId)) {
+                console.debug(`${LOG_PREFIX} Skipped translate MESSAGE_UPDATED listener for message ${messageId}`);
+                return;
+            }
+
+            return listener.apply(this, [messageId, ...args]);
+        };
+
+        wrapped[TRANSLATE_MESSAGE_UPDATED_OPTIMIZATION_KEY] = true;
+        wrapped.__baiBaiToolkitOriginalTranslateMessageUpdatedListener = listener;
+        listeners[index] = wrapped;
+        installed += 1;
+    }
+
+    state.installed = listeners.some(listener => listener?.[TRANSLATE_MESSAGE_UPDATED_OPTIMIZATION_KEY]);
+
+    if (!state.installed && !state.retryTimer) {
+        scheduleTranslateMessageUpdatedOptimizationRetry();
+    }
+
+    if (installed > 0) {
+        state.retryCount = 0;
+        console.debug(`${LOG_PREFIX} Translate MESSAGE_UPDATED optimization installed (${installed})`);
+    }
+}
+
+function restoreTranslateMessageUpdatedOptimization() {
+    const listeners = eventSource?.events?.[event_types.MESSAGE_UPDATED];
+    const state = getTranslateMessageUpdatedOptimizationState();
+
+    if (state.retryTimer) {
+        clearTimeout(state.retryTimer);
+        state.retryTimer = null;
+    }
+
+    if (!Array.isArray(listeners)) {
+        state.installed = false;
+        return;
+    }
+
+    let restored = 0;
+
+    for (let index = 0; index < listeners.length; index++) {
+        const listener = listeners[index];
+
+        if (!listener?.[TRANSLATE_MESSAGE_UPDATED_OPTIMIZATION_KEY]) {
+            continue;
+        }
+
+        const original = listener.__baiBaiToolkitOriginalTranslateMessageUpdatedListener;
+        if (typeof original === 'function') {
+            listeners[index] = original;
+            restored += 1;
+        }
+    }
+
+    state.installed = false;
+    state.retryCount = 0;
+
+    if (restored > 0) {
+        console.debug(`${LOG_PREFIX} Translate MESSAGE_UPDATED optimization restored (${restored})`);
+    }
+}
+
+function scheduleTranslateMessageUpdatedOptimizationRetry() {
+    const state = getTranslateMessageUpdatedOptimizationState();
+
+    if (state.retryTimer || !settings.translateMessageUpdatedOptimizationEnabled) {
+        return;
+    }
+
+    state.retryCount = Number(state.retryCount || 0) + 1;
+    if (state.retryCount > 30) {
+        console.debug(`${LOG_PREFIX} Translate MESSAGE_UPDATED optimization listener was not found after retries`);
+        return;
+    }
+
+    state.retryTimer = setTimeout(() => {
+        state.retryTimer = null;
+        if (settings.translateMessageUpdatedOptimizationEnabled) {
+            installTranslateMessageUpdatedOptimization();
+        }
+    }, 1000);
+}
+
+function isTranslateMessageUpdatedListener(listener) {
+    if (typeof listener !== 'function') {
+        return false;
+    }
+
+    const source = getFunctionSource(listener);
+    return source.includes('translateFunction')
+        && source.includes('shouldTranslateFunction')
+        && source.includes('await translateFunction');
+}
+
+function shouldSkipTranslateMessageUpdatedListener(messageId) {
+    const autoMode = String(extension_settings?.translate?.auto_mode ?? '').toLowerCase();
+
+    if (autoMode !== 'none') {
+        return false;
+    }
+
+    const index = Number(messageId);
+    if (!Number.isInteger(index) || index < 0) {
+        return false;
+    }
+
+    const message = Array.isArray(scriptModule.chat) ? scriptModule.chat[index] : null;
+    if (!message) {
+        return false;
+    }
+
+    return !message.extra?.display_text;
+}
+
+function getPerformanceTraceState() {
+    if (!extensionState.performanceTrace || typeof extensionState.performanceTrace !== 'object') {
+        extensionState.performanceTrace = {};
+    }
+
+    return extensionState.performanceTrace;
+}
+
+function startPerformanceTrace() {
+    const state = getPerformanceTraceState();
+
+    if (state.active) {
+        return;
+    }
+
+    Object.assign(state, {
+        active: true,
+        startedAt: performance.now(),
+        startedAtIso: new Date().toISOString(),
+        endedAtIso: '',
+        lines: [],
+        lastKeys: new Map(),
+        responseInfo: new WeakMap(),
+        counters: {
+            dropped: 0,
+            suppressed: 0,
+            events: 0,
+            fetches: 0,
+            gzipCompression: 0,
+            jsonStringify: 0,
+            responseJson: 0,
+            longTasks: 0,
+            longDomRefreshes: 0,
+            interactions: 0,
+            listeners: 0,
+        },
+        activities: [],
+        eventStats: new Map(),
+        listenerStats: new Map(),
+        fetchStats: new Map(),
+        gzipStats: new Map(),
+        jsonStats: new Map(),
+        responseJsonStats: new Map(),
+        longDomRefreshStats: new Map(),
+    });
+
+    installPerformanceTraceRuntimePatches(state);
+    appendPerformanceTraceLine('trace', `start ${getPerformanceTraceSnapshot({ includeTextStats: true })}`);
+
+    state.uiTimer = setInterval(updatePerformanceTraceControls, 1000);
+    updatePerformanceTraceControls();
+    notifyPerformanceTrace('Performance trace started.');
+}
+
+function stopPerformanceTraceAndExport() {
+    const state = getPerformanceTraceState();
+
+    if (!state.active) {
+        return;
+    }
+
+    appendPerformanceTraceLine('trace', `stop ${getPerformanceTraceSnapshot({ includeTextStats: true })}`);
+    state.active = false;
+    state.endedAtIso = new Date().toISOString();
+
+    restorePerformanceTraceRuntimePatches(state);
+    clearInterval(state.uiTimer);
+    state.uiTimer = null;
+
+    const text = buildPerformanceTraceExport(state);
+    const filename = `st-performance-trace-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+    downloadTextFile(filename, text);
+
+    updatePerformanceTraceControls();
+    notifyPerformanceTrace('Performance trace exported.');
+}
+
+function installPerformanceTraceRuntimePatches(state) {
+    installPerformanceTraceEventEmitPatch(state);
+    installPerformanceTraceJsonStringifyPatch(state);
+    installPerformanceTraceResponseJsonPatch(state);
+    installPerformanceTraceLongTaskObserver(state);
+    installPerformanceTraceInteractionListeners(state);
+}
+
+function restorePerformanceTraceRuntimePatches(state) {
+    if (state.originalEventEmit) {
+        eventSource.emit = state.originalEventEmit;
+        state.originalEventEmit = null;
+    }
+
+    if (state.originalJsonStringify) {
+        JSON.stringify = state.originalJsonStringify;
+        state.originalJsonStringify = null;
+    }
+
+    if (state.originalResponseJson && typeof Response !== 'undefined') {
+        Response.prototype.json = state.originalResponseJson;
+        state.originalResponseJson = null;
+    }
+
+    if (state.longTaskObserver) {
+        state.longTaskObserver.disconnect();
+        state.longTaskObserver = null;
+    }
+
+    if (state.interactionClickHandler) {
+        document.removeEventListener('click', state.interactionClickHandler, true);
+        state.interactionClickHandler = null;
+    }
+
+    if (state.interactionKeydownHandler) {
+        document.removeEventListener('keydown', state.interactionKeydownHandler, true);
+        state.interactionKeydownHandler = null;
+    }
+}
+
+function installPerformanceTraceEventEmitPatch(state) {
+    if (state.originalEventEmit || typeof eventSource?.emit !== 'function') {
+        return;
+    }
+
+    state.originalEventEmit = eventSource.emit;
+    eventSource.emit = async function baiBaiToolkitPerformanceTraceEmit(event, ...args) {
+        const traceState = getPerformanceTraceState();
+
+        if (!traceState.active || !PERFORMANCE_TRACE_EVENTS.has(event)) {
+            return traceState.originalEventEmit.apply(this, [event, ...args]);
+        }
+
+        const start = performance.now();
+        const listeners = Array.isArray(this.events?.[event]) ? this.events[event].slice() : [];
+
+        if (localStorage.getItem('eventTracing') === 'true') {
+            console.trace('Event emitted: ' + event, args);
+        } else {
+            console.debug('Event emitted: ' + event);
+        }
+
+        for (let index = 0; index < listeners.length; index++) {
+            const listener = listeners[index];
+            const listenerStart = performance.now();
+            let error = null;
+
+            try {
+                await listener.apply(this, args);
+            } catch (err) {
+                error = err;
+                console.error(err);
+                console.trace('Error in event listener');
+            } finally {
+                const listenerDuration = performance.now() - listenerStart;
+                recordPerformanceTraceListener(event, listener, index, listenerDuration, error);
+            }
+        }
+
+        if (this.autoFireAfterEmit?.has(event)) {
+            this.autoFireLastArgs?.set(event, args);
+        }
+
+        const duration = performance.now() - start;
+        recordPerformanceTraceEvent(event, args, duration, listeners.length);
+    };
+}
+
+function installPerformanceTraceJsonStringifyPatch(state) {
+    if (state.originalJsonStringify || typeof JSON.stringify !== 'function') {
+        return;
+    }
+
+    state.originalJsonStringify = JSON.stringify;
+    JSON.stringify = function baiBaiToolkitPerformanceTraceStringify(value, replacer, space) {
+        const traceState = getPerformanceTraceState();
+        const kind = traceState.active ? getJsonStringifyTraceKind(value) : null;
+        const start = traceState.active ? performance.now() : 0;
+        const result = traceState.originalJsonStringify.apply(this, [value, replacer, space]);
+
+        if (traceState.active) {
+            const duration = performance.now() - start;
+            if (kind || duration >= PERFORMANCE_TRACE_SLOW_MS) {
+                recordPerformanceTraceJsonStringify(kind || { name: 'slow-json', count: 0 }, duration, result);
+            }
+        }
+
+        return result;
+    };
+}
+
+function installPerformanceTraceResponseJsonPatch(state) {
+    if (state.originalResponseJson || typeof Response === 'undefined' || typeof Response.prototype?.json !== 'function') {
+        return;
+    }
+
+    state.originalResponseJson = Response.prototype.json;
+    Response.prototype.json = async function baiBaiToolkitPerformanceTraceResponseJson(...args) {
+        const traceState = getPerformanceTraceState();
+        const info = traceState.active ? traceState.responseInfo?.get(this) : null;
+        const start = traceState.active ? performance.now() : 0;
+        const result = await traceState.originalResponseJson.apply(this, args);
+
+        if (traceState.active) {
+            const duration = performance.now() - start;
+            if (info || duration >= PERFORMANCE_TRACE_SLOW_MS) {
+                recordPerformanceTraceResponseJson(info, result, duration);
+            }
+        }
+
+        return result;
+    };
+}
+
+function installPerformanceTraceLongTaskObserver(state) {
+    if (state.longTaskObserver || typeof PerformanceObserver !== 'function') {
+        return;
+    }
+
+    const supported = PerformanceObserver.supportedEntryTypes || [];
+    if (supported.length && !supported.includes('longtask')) {
+        return;
+    }
+
+    try {
+        state.longTaskObserver = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+                recordPerformanceTraceLongTask(entry);
+            }
+        });
+        state.longTaskObserver.observe({ entryTypes: ['longtask'] });
+    } catch (error) {
+        appendPerformanceTraceLine('trace', `longtask observer unavailable error=${sanitizeTraceValue(error?.message || error)}`);
+    }
+}
+
+function installPerformanceTraceInteractionListeners(state) {
+    if (state.interactionClickHandler || state.interactionKeydownHandler) {
+        return;
+    }
+
+    state.interactionClickHandler = (event) => {
+        const target = event.target instanceof Element
+            ? event.target.closest(PERFORMANCE_TRACE_INTERACTION_SELECTOR)
+            : null;
+
+        if (!target) {
+            return;
+        }
+
+        recordPerformanceTraceInteraction('click', getTraceElementLabel(target));
+    };
+
+    state.interactionKeydownHandler = (event) => {
+        const target = event.target;
+        if (!(target instanceof Element) || target.id !== 'send_textarea') {
+            return;
+        }
+
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey || !event.shiftKey)) {
+            recordPerformanceTraceInteraction('keydown', `#send_textarea key=${event.key} ctrl=${event.ctrlKey} meta=${event.metaKey} shift=${event.shiftKey}`);
+        }
+    };
+
+    document.addEventListener('click', state.interactionClickHandler, true);
+    document.addEventListener('keydown', state.interactionKeydownHandler, true);
+}
+
+function installPerformanceTraceFetchHook() {
+    const existing = globalThis[PERFORMANCE_TRACE_FETCH_KEY];
+    if (existing?.wrappedFetch) {
+        return existing;
+    }
+
+    const originalFetch = globalThis.fetch;
+    if (typeof originalFetch !== 'function') {
+        return null;
+    }
+
+    const state = {
+        originalFetch: originalFetch.bind(globalThis),
+        wrappedFetch: null,
+    };
+
+    state.wrappedFetch = async function baiBaiToolkitPerformanceTraceFetch(input, init) {
+        const traceState = getPerformanceTraceState();
+        const info = traceState.active ? getPerformanceTraceFetchInfo(input, init) : null;
+
+        if (!info) {
+            return state.originalFetch(input, init);
+        }
+
+        const start = performance.now();
+        recordPerformanceTraceFetchStart(info);
+
+        try {
+            const response = await state.originalFetch(input, init);
+            const duration = performance.now() - start;
+            traceState.responseInfo?.set(response, {
+                ...info,
+                status: response?.status,
+            });
+            recordPerformanceTraceFetchEnd(info, duration, response?.status);
+            return response;
+        } catch (error) {
+            const duration = performance.now() - start;
+            recordPerformanceTraceFetchError(info, duration, error);
+            throw error;
+        }
+    };
+
+    state.wrappedFetch[PERFORMANCE_TRACE_FETCH_KEY] = true;
+    globalThis[PERFORMANCE_TRACE_FETCH_KEY] = state;
+    globalThis.fetch = state.wrappedFetch;
+    return state;
+}
+
+function recordPerformanceTraceEvent(event, args, duration, listenerCount = 0) {
+    const state = getPerformanceTraceState();
+    state.counters.events += 1;
+    updatePerformanceTraceStats(state.eventStats, event, duration);
+    rememberPerformanceTraceActivity('event', event, performance.now() - duration);
+
+    const slow = duration >= PERFORMANCE_TRACE_SLOW_MS;
+    const key = `event:${event}:${summarizeTraceArgs(args, 1)}`;
+    const argsSummary = summarizeTraceArgs(args);
+    appendPerformanceTraceLine(
+        'event',
+        `${event} duration=${formatTraceMs(duration)} listeners=${listenerCount} args=${argsSummary}`,
+        { key, dedupeMs: slow ? 0 : PERFORMANCE_TRACE_DEDUPE_MS },
+    );
+}
+
+function recordPerformanceTraceListener(event, listener, index, duration, error = null) {
+    const state = getPerformanceTraceState();
+    const label = getPerformanceTraceListenerLabel(event, listener, index);
+    const key = `${event} ${label}`;
+    const shouldLog = duration >= PERFORMANCE_TRACE_LISTENER_LOG_MS || error;
+
+    state.counters.listeners += 1;
+    updatePerformanceTraceStats(state.listenerStats, key, duration);
+
+    if (!shouldLog) {
+        return;
+    }
+
+    appendPerformanceTraceLine(
+        'listener',
+        `${event} #${index + 1}/${getPerformanceTraceListenerCount(event)} ${label} duration=${formatTraceMs(duration)}${error ? ` error=${sanitizeTraceValue(error?.message || error)}` : ''}`,
+        { key: `listener:${event}:${index}:${label}:${Math.round(duration / 10)}`, dedupeMs: 100 },
+    );
+}
+
+function recordPerformanceTraceJsonStringify(kind, duration, result) {
+    const state = getPerformanceTraceState();
+    state.counters.jsonStringify += 1;
+    updatePerformanceTraceStats(state.jsonStats, kind.name, duration);
+    rememberPerformanceTraceActivity('json', kind.name, performance.now() - duration);
+
+    const chars = typeof result === 'string' ? result.length : 0;
+    appendPerformanceTraceLine(
+        'json',
+        `JSON.stringify kind=${kind.name} items=${kind.count || 0} chars=${chars} duration=${formatTraceMs(duration)}`,
+        { key: `json:${kind.name}:${kind.count}:${chars}`, dedupeMs: 500 },
+    );
+}
+
+function recordPerformanceTraceResponseJson(info, result, duration) {
+    const state = getPerformanceTraceState();
+    const path = info?.path || 'unknown';
+    state.counters.responseJson += 1;
+    updatePerformanceTraceStats(state.responseJsonStats, path, duration);
+    appendPerformanceTraceLine(
+        'response-json',
+        `path=${path} result=${summarizeResponseJsonResult(result)} duration=${formatTraceMs(duration)}`,
+        { key: `response-json:${path}:${summarizeResponseJsonResult(result)}`, dedupeMs: 500 },
+    );
+}
+
+function recordPerformanceTraceLongTask(entry) {
+    const state = getPerformanceTraceState();
+    if (!state.active) {
+        return;
+    }
+
+    state.counters.longTasks += 1;
+    const relativeStart = Math.max(0, entry.startTime - state.startedAt);
+    const nearby = getNearbyPerformanceTraceActivity(entry.startTime);
+    const attribution = summarizePerformanceTraceLongTaskAttribution(entry);
+    appendPerformanceTraceLine(
+        'longtask',
+        `duration=${formatTraceMs(entry.duration)} taskStart=+${formatTraceMs(relativeStart)}${nearby ? ` near=${nearby}` : ''}${attribution ? ` attr=${attribution}` : ''}`,
+        { key: `longtask:${Math.round(entry.startTime)}`, dedupeMs: 0 },
+    );
+}
+
+function recordPerformanceTraceLongDomRefresh(info) {
+    const state = getPerformanceTraceState();
+    if (!state.active || !info) {
+        return;
+    }
+
+    state.counters.longDomRefreshes = Number(state.counters.longDomRefreshes || 0) + 1;
+    if (!(state.longDomRefreshStats instanceof Map)) {
+        state.longDomRefreshStats = new Map();
+    }
+    const reason = sanitizeTraceValue(info.reason || 'unknown');
+    updatePerformanceTraceStats(state.longDomRefreshStats, reason, info.duration);
+
+    if (info.duration < PERFORMANCE_TRACE_LISTENER_LOG_MS) {
+        return;
+    }
+
+    appendPerformanceTraceLine(
+        'longdom',
+        [
+            `refresh reason=${reason}`,
+            `duration=${formatTraceMs(info.duration)}`,
+            `messages=${info.messages || 0}`,
+            `optimized=${info.optimized ? 'yes' : 'no'}`,
+            `contained=${info.contained || 0}`,
+            `editing=${info.editing || 0}`,
+            `cached=${info.cached || 0}`,
+            `estimated=${info.estimated || 0}`,
+        ].join(' '),
+        { key: `longdom:${reason}`, dedupeMs: 80 },
+    );
+}
+
+function recordPerformanceTraceInteraction(type, label) {
+    const state = getPerformanceTraceState();
+    if (!state.active) {
+        return;
+    }
+
+    state.counters.interactions += 1;
+    rememberPerformanceTraceActivity('interaction', `${type}:${label}`);
+    appendPerformanceTraceLine(
+        'interaction',
+        `${type} ${sanitizeTraceValue(label)}`,
+        { key: `interaction:${type}:${label}`, dedupeMs: 500 },
+    );
+}
+
+function recordPerformanceTraceFetchStart(info) {
+    const state = getPerformanceTraceState();
+    state.counters.fetches += 1;
+    rememberPerformanceTraceActivity('fetch-start', `${info.method} ${info.path}`);
+    appendPerformanceTraceLine(
+        'fetch-start',
+        `${info.method} ${info.path} body=${info.bodySize} encoding=${info.encoding || 'none'}`,
+        { key: `fetch-start:${info.method}:${info.path}:${info.bodySize}`, dedupeMs: 250 },
+    );
+}
+
+function recordPerformanceTraceFetchEnd(info, duration, status) {
+    const state = getPerformanceTraceState();
+    updatePerformanceTraceStats(state.fetchStats, `${info.method} ${info.path}`, duration);
+    rememberPerformanceTraceActivity('fetch-end', `${info.method} ${info.path}`, performance.now() - duration);
+    appendPerformanceTraceLine(
+        'fetch-end',
+        `${info.method} ${info.path} status=${status || 'unknown'} duration=${formatTraceMs(duration)} body=${info.bodySize}`,
+        { key: `fetch-end:${info.method}:${info.path}:${status}:${info.bodySize}`, dedupeMs: 250 },
+    );
+}
+
+function recordPerformanceTraceFetchError(info, duration, error) {
+    rememberPerformanceTraceActivity('fetch-error', `${info.method} ${info.path}`, performance.now() - duration);
+    appendPerformanceTraceLine(
+        'fetch-error',
+        `${info.method} ${info.path} duration=${formatTraceMs(duration)} error=${sanitizeTraceValue(error?.message || error)}`,
+        { key: `fetch-error:${info.method}:${info.path}`, dedupeMs: 250 },
+    );
+}
+
+function recordPerformanceTraceGzipCompression(info) {
+    const state = getPerformanceTraceState();
+    if (!state.active) {
+        return;
+    }
+
+    const duration = Number(info?.duration || 0);
+    const label = `${info?.method || 'POST'} ${info?.path || '/api/chats/save'}`;
+    const originalBytes = Number(info?.originalBytes || 0);
+    const compressedBytes = Number(info?.compressedBytes || 0);
+    const ratio = originalBytes > 0 && compressedBytes > 0
+        ? `${Math.round((compressedBytes / originalBytes) * 100)}%`
+        : 'n/a';
+
+    state.counters.gzipCompression += 1;
+    updatePerformanceTraceStats(state.gzipStats, label, duration);
+    rememberPerformanceTraceActivity('gzip', label, info?.startedAt || performance.now() - duration);
+
+    appendPerformanceTraceLine(
+        'gzip',
+        `${label} original=${formatTraceBytes(originalBytes)} compressed=${formatTraceBytes(compressedBytes)} ratio=${ratio} duration=${formatTraceMs(duration)}${info?.caller ? ` caller=${sanitizeTraceValue(info.caller)}` : ''}`,
+        { key: `gzip:${label}:${originalBytes}:${compressedBytes}:${Math.round(duration / 10)}`, dedupeMs: 0 },
+    );
+}
+
+function rememberPerformanceTraceActivity(type, label, at = performance.now()) {
+    const state = getPerformanceTraceState();
+    if (!state.active || !Array.isArray(state.activities)) {
+        return;
+    }
+
+    state.activities.push({
+        at,
+        type: sanitizeTraceValue(type),
+        label: sanitizeTraceValue(label),
+    });
+
+    while (state.activities.length > 80) {
+        state.activities.shift();
+    }
+}
+
+function getNearbyPerformanceTraceActivity(startTime) {
+    const state = getPerformanceTraceState();
+    const activities = Array.isArray(state.activities) ? state.activities : [];
+    let nearest = null;
+    let nearestDistance = Infinity;
+
+    for (const activity of activities) {
+        const distance = Math.abs(startTime - activity.at);
+        if (distance < nearestDistance) {
+            nearest = activity;
+            nearestDistance = distance;
+        }
+    }
+
+    if (!nearest || nearestDistance > 1200) {
+        return '';
+    }
+
+    const delta = startTime - nearest.at;
+    const sign = delta >= 0 ? '+' : '-';
+    return `${nearest.type}:${nearest.label}${sign}${formatTraceMs(Math.abs(delta))}`;
+}
+
+function summarizePerformanceTraceLongTaskAttribution(entry) {
+    const attribution = Array.isArray(entry?.attribution) ? entry.attribution[0] : null;
+    if (!attribution) {
+        return '';
+    }
+
+    return [
+        attribution.name,
+        attribution.containerType,
+        attribution.containerName,
+        attribution.containerSrc,
+    ]
+        .filter(Boolean)
+        .map(sanitizeTraceValue)
+        .join('/');
+}
+
+function appendPerformanceTraceLine(type, message, { key = '', dedupeMs = PERFORMANCE_TRACE_DEDUPE_MS } = {}) {
+    const state = getPerformanceTraceState();
+    if (!state.active || !Array.isArray(state.lines)) {
+        return;
+    }
+
+    const now = performance.now();
+    const elapsed = now - state.startedAt;
+
+    if (key && dedupeMs > 0) {
+        const previous = state.lastKeys.get(key) || 0;
+        if (now - previous < dedupeMs) {
+            state.counters.suppressed += 1;
+            return;
+        }
+        state.lastKeys.set(key, now);
+    }
+
+    const snapshot = getPerformanceTraceSnapshot();
+    let line = `+${formatTraceMs(elapsed)} ${type} ${message} | ${snapshot}`;
+
+    if (line.length > PERFORMANCE_TRACE_MAX_LINE_LENGTH) {
+        line = `${line.slice(0, PERFORMANCE_TRACE_MAX_LINE_LENGTH - 15)}...<truncated>`;
+    }
+
+    state.lines.push(line);
+
+    while (state.lines.length > PERFORMANCE_TRACE_MAX_LINES) {
+        state.lines.shift();
+        state.counters.dropped += 1;
+    }
+}
+
+function getPerformanceTraceFetchInfo(input, init) {
+    const rawUrl = getFetchRequestUrl(input);
+    if (!rawUrl) {
+        return null;
+    }
+
+    try {
+        const url = new URL(rawUrl, location.href);
+        if (!PERFORMANCE_TRACE_FETCH_PATHS.has(url.pathname)) {
+            return null;
+        }
+
+        const headers = buildFetchHeaders(input, init);
+        return {
+            path: url.pathname,
+            method: getFetchRequestMethod(input, init),
+            bodySize: getTraceFetchBodySize(init?.body),
+            encoding: headers.get('Content-Encoding') || '',
+        };
+    } catch {
+        return null;
+    }
+}
+
+function getTraceFetchBodySize(body) {
+    if (body == null) {
+        return 'none';
+    }
+
+    if (typeof body === 'string') {
+        return `${body.length}ch`;
+    }
+
+    if (body instanceof Blob) {
+        return `${body.size}B`;
+    }
+
+    if (body instanceof URLSearchParams) {
+        return `${String(body).length}ch`;
+    }
+
+    if (body instanceof ArrayBuffer) {
+        return `${body.byteLength}B`;
+    }
+
+    if (ArrayBuffer.isView(body)) {
+        return `${body.byteLength}B`;
+    }
+
+    if (body instanceof FormData) {
+        return 'form-data';
+    }
+
+    return typeof body;
+}
+
+function getJsonStringifyTraceKind(value) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    if (Array.isArray(value.chat)) {
+        return {
+            name: value.id ? 'group-chat-save-body' : 'chat-save-body',
+            count: value.chat.length,
+        };
+    }
+
+    if (Array.isArray(value) && value[0]?.chat_metadata) {
+        return {
+            name: 'chat-array',
+            count: value.length,
+        };
+    }
+
+    return null;
+}
+
+function getPerformanceTraceSnapshot({ includeTextStats = false } = {}) {
+    const chat = Array.isArray(scriptModule.chat) ? scriptModule.chat : [];
+    const visibleMessages = document.querySelectorAll('#chat .mes').length;
+    const firstVisible = document.querySelector('#chat .mes')?.getAttribute('mesid') ?? 'none';
+    const lastVisible = [...document.querySelectorAll('#chat .mes')].at(-1)?.getAttribute('mesid') ?? 'none';
+    const memory = getPerformanceMemorySnapshot();
+    const base = [
+        `chat=${chat.length}`,
+        `visible=${visibleMessages}`,
+        `range=${firstVisible}-${lastVisible}`,
+        `trunc=${power_user?.chat_truncation ?? 'unknown'}`,
+        `chatId=${sanitizeTraceValue(getCurrentChatId() || 'none')}`,
+        memory,
+        getLongChatDomRenderSnapshot(),
+    ].filter(Boolean);
+
+    if (includeTextStats) {
+        base.push(getChatTextStats(chat));
+    }
+
+    base.push(getVisibleMessageTextStats(chat));
+
+    return base.join(' ');
+}
+
+function getChatTextStats(chat) {
+    let textChars = 0;
+    let mediaItems = 0;
+
+    for (const message of chat) {
+        textChars += typeof message?.mes === 'string' ? message.mes.length : 0;
+        mediaItems += Array.isArray(message?.extra?.media) ? message.extra.media.length : 0;
+        mediaItems += Array.isArray(message?.extra?.files) ? message.extra.files.length : 0;
+    }
+
+    return `textChars=${textChars} mediaItems=${mediaItems}`;
+}
+
+function getVisibleMessageTextStats(chat) {
+    const stats = calculateVisibleMessageTextStats(chat);
+    return `visibleTextChars=${stats.visibleTextChars} maxVisibleMes=${stats.maxVisibleMesId}:${stats.maxVisibleChars}`;
+}
+
+function calculateVisibleMessageTextStats(chat, visibleMessages = [...document.querySelectorAll('#chat .mes')]) {
+    let visibleTextChars = 0;
+    let maxVisibleChars = 0;
+    let maxVisibleMesId = 'none';
+
+    for (const element of visibleMessages) {
+        const mesId = element.getAttribute('mesid') ?? '';
+        const index = Number(mesId);
+        const message = Number.isInteger(index) ? chat[index] : null;
+        const chars = getLongChatMessageTextLength(message);
+
+        visibleTextChars += chars;
+        if (chars > maxVisibleChars) {
+            maxVisibleChars = chars;
+            maxVisibleMesId = mesId || 'none';
+        }
+    }
+
+    return { visibleTextChars, maxVisibleChars, maxVisibleMesId };
+}
+
+function getPerformanceMemorySnapshot() {
+    const memory = performance.memory;
+    if (!memory) {
+        return '';
+    }
+
+    return `heap=${formatTraceBytes(memory.usedJSHeapSize)}/${formatTraceBytes(memory.jsHeapSizeLimit)}`;
+}
+
+function getLongChatDomRenderSnapshot() {
+    if (!settings.longChatDomRenderOptimizationEnabled) {
+        return 'longDom=off';
+    }
+
+    const chat = document.querySelector('#chat');
+    if (!(chat instanceof HTMLElement)) {
+        return 'longDom=pending';
+    }
+
+    const optimized = chat.classList.contains('bai-bai-toolkit-long-chat-render-optimized');
+    const contained = chat.querySelectorAll('.mes.bai-bai-toolkit-long-chat-contained').length;
+    return `longDom=${optimized ? 'on' : 'idle'}:${contained}`;
+}
+
+function summarizeTraceArgs(args, limit = 3) {
+    return args
+        .slice(0, limit)
+        .map((arg) => summarizeTraceArg(arg))
+        .join(',');
+}
+
+function summarizeTraceArg(arg) {
+    if (arg == null) {
+        return String(arg);
+    }
+
+    if (['string', 'number', 'boolean'].includes(typeof arg)) {
+        return sanitizeTraceValue(arg);
+    }
+
+    if (Array.isArray(arg)) {
+        return `Array(${arg.length})`;
+    }
+
+    if (typeof arg === 'object') {
+        if ('messageId' in arg || 'mesId' in arg || 'newSwipeId' in arg) {
+            return `{messageId=${arg.messageId ?? arg.mesId ?? 'n/a'},newSwipeId=${arg.newSwipeId ?? 'n/a'}}`;
+        }
+
+        if (arg.detail?.id !== undefined) {
+            return `{detail.id=${sanitizeTraceValue(arg.detail.id)}}`;
+        }
+
+        const keys = Object.keys(arg).slice(0, 5).join(',');
+        return `{keys=${keys}}`;
+    }
+
+    return typeof arg;
+}
+
+function getPerformanceTraceListenerCount(event) {
+    return Array.isArray(eventSource?.events?.[event]) ? eventSource.events[event].length : 0;
+}
+
+function getPerformanceTraceListenerLabel(event, listener, index) {
+    const name = listener?.name || 'anonymous';
+    const source = getFunctionSource(listener);
+    const hint = inferPerformanceTraceListenerHint(event, listener, source);
+    return `${hint || 'unknown'}:${name}#${index + 1}`;
+}
+
+function getFunctionSource(fn) {
+    try {
+        return Function.prototype.toString.call(fn).slice(0, 1600);
+    } catch {
+        return '';
+    }
+}
+
+function inferPerformanceTraceListenerHint(event, listener, source) {
+    const name = listener?.name || '';
+
+    if (source.includes('translateFunction') || source.includes('translateIncomingMessage') || source.includes('translateMessageEdit')) {
+        return 'translate';
+    }
+
+    if (source.includes('extension_settings.memory') || source.includes('getLatestMemoryFromChat') || source.includes('setMemoryContext')) {
+        return 'memory';
+    }
+
+    if (source.includes('PromptReasoning') || source.includes('updateReasoningUI') || source.includes('eventHandler(event, idx)')) {
+        return 'reasoning';
+    }
+
+    if (source.includes('renderDebounced') || source.includes('PromptManager')) {
+        return 'prompt-manager';
+    }
+
+    if (source.includes('moduleWorker.update') || source.includes('vectors') || name.includes('vectors')) {
+        return 'vectors';
+    }
+
+    if (source.includes('debouncedRender') || source.includes('logprobs')) {
+        return 'logprobs';
+    }
+
+    if (source.includes('getContext().saveChat') || source.includes('saveChatConditional')) {
+        return 'save-chat';
+    }
+
+    if (source.includes('baiBaiToolkit') || source.includes('MobileMessageEdit') || source.includes('mobileMessageEdit')) {
+        return 'this-plugin';
+    }
+
+    if (name && name !== 'anonymous') {
+        return 'named';
+    }
+
+    return '';
+}
+
+function summarizeResponseJsonResult(result) {
+    if (Array.isArray(result)) {
+        const first = result[0]?.chat_metadata ? 'chat-header' : typeof result[0];
+        return `Array(${result.length},first=${first})`;
+    }
+
+    if (result && typeof result === 'object') {
+        return `{keys=${Object.keys(result).slice(0, 5).join(',')}}`;
+    }
+
+    return sanitizeTraceValue(typeof result);
+}
+
+function updatePerformanceTraceStats(map, key, duration) {
+    const stats = map.get(key) || { count: 0, total: 0, max: 0 };
+    stats.count += 1;
+    stats.total += duration;
+    stats.max = Math.max(stats.max, duration);
+    map.set(key, stats);
+}
+
+function buildPerformanceTraceExport(state) {
+    const duration = state.endedAtIso
+        ? new Date(state.endedAtIso).getTime() - new Date(state.startedAtIso).getTime()
+        : 0;
+    const lines = [
+        'SillyTavern performance trace',
+        `started=${state.startedAtIso || ''}`,
+        `ended=${state.endedAtIso || ''}`,
+        `duration=${duration}ms`,
+        `finalSnapshot=${getPerformanceTraceSnapshot({ includeTextStats: true })}`,
+        '',
+        'Counters',
+        `events=${state.counters?.events || 0}`,
+        `fetches=${state.counters?.fetches || 0}`,
+        `gzipCompression=${state.counters?.gzipCompression || 0}`,
+        `jsonStringify=${state.counters?.jsonStringify || 0}`,
+        `responseJson=${state.counters?.responseJson || 0}`,
+        `longTasks=${state.counters?.longTasks || 0}`,
+        `longDomRefreshes=${state.counters?.longDomRefreshes || 0}`,
+        `interactions=${state.counters?.interactions || 0}`,
+        `listeners=${state.counters?.listeners || 0}`,
+        `suppressedDuplicates=${state.counters?.suppressed || 0}`,
+        `droppedOldLines=${state.counters?.dropped || 0}`,
+        '',
+        'Top Events',
+        ...formatTraceStatsMap(state.eventStats),
+        '',
+        'Top Listeners',
+        ...formatTraceStatsMap(state.listenerStats),
+        '',
+        'Top Fetches',
+        ...formatTraceStatsMap(state.fetchStats),
+        '',
+        'Top Gzip compression',
+        ...formatTraceStatsMap(state.gzipStats),
+        '',
+        'Top JSON.stringify',
+        ...formatTraceStatsMap(state.jsonStats),
+        '',
+        'Top Response.json',
+        ...formatTraceStatsMap(state.responseJsonStats),
+        '',
+        'Top Long DOM Refresh',
+        ...formatTraceStatsMap(state.longDomRefreshStats),
+        '',
+        'Log',
+        ...(state.lines || []),
+    ];
+
+    return lines.join('\n');
+}
+
+function formatTraceStatsMap(map) {
+    if (!map || !map.size) {
+        return ['none'];
+    }
+
+    return [...map.entries()]
+        .sort((a, b) => b[1].total - a[1].total)
+        .slice(0, 12)
+        .map(([key, stats]) => `${key} count=${stats.count} total=${formatTraceMs(stats.total)} max=${formatTraceMs(stats.max)}`);
+}
+
+function updatePerformanceTraceControls() {
+    const state = getPerformanceTraceState();
+    const active = Boolean(state.active);
+    const lineCount = Array.isArray(state.lines) ? state.lines.length : 0;
+    const dropped = state.counters?.dropped || 0;
+    const suppressed = state.counters?.suppressed || 0;
+
+    $('#bai_bai_toolkit_perf_trace_start').toggleClass('disabled', active);
+    $('#bai_bai_toolkit_perf_trace_stop').toggleClass('disabled', !active);
+    $('#bai_bai_toolkit_perf_trace_status').text(
+        active
+            ? `recording, lines=${lineCount}, suppressed=${suppressed}, dropped=${dropped}`
+            : `idle, last lines=${lineCount}, suppressed=${suppressed}, dropped=${dropped}`,
+    );
+}
+
+function downloadTextFile(filename, text) {
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function notifyPerformanceTrace(message) {
+    if (globalThis.toastr?.info) {
+        globalThis.toastr.info(message, 'Performance trace');
+    }
+}
+
+function getTraceElementLabel(element) {
+    if (element.id) {
+        return `#${element.id}`;
+    }
+
+    const classes = [...element.classList].slice(0, 4).join('.');
+    return `${element.tagName.toLowerCase()}${classes ? `.${classes}` : ''}`;
+}
+
+function getPerformanceTraceStackSummary() {
+    const state = getPerformanceTraceState();
+    if (!state.active) {
+        return '';
+    }
+
+    try {
+        const stack = new Error().stack;
+        if (!stack) {
+            return '';
+        }
+
+        return stack
+            .split('\n')
+            .map(line => line.trim().replace(/^at\s+/, ''))
+            .filter(line => line
+                && !line.includes('getPerformanceTraceStackSummary')
+                && !line.includes('baiBaiToolkitSaveRequestGzipFetch')
+                && !line.includes('baiBaiToolkitPerformanceTraceFetch')
+                && !line.includes('gzipFetchBody')
+                && !line.includes('recordPerformanceTrace'))
+            .slice(0, 4)
+            .map(line => line.replace(location.origin, ''))
+            .join(' <- ');
+    } catch {
+        return '';
+    }
+}
+
+function sanitizeTraceValue(value) {
+    return String(value)
+        .replace(/\s+/g, ' ')
+        .slice(0, 120);
+}
+
+function formatTraceMs(value) {
+    return `${Number(value || 0).toFixed(1)}ms`;
+}
+
+function formatTraceBytes(value) {
+    const bytes = Number(value || 0);
+    if (bytes >= 1024 * 1024) {
+        return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+    }
+    if (bytes >= 1024) {
+        return `${(bytes / 1024).toFixed(1)}KB`;
+    }
+    return `${bytes}B`;
 }
 
 function initializeExtensionUpdateCheck() {
@@ -585,6 +1833,40 @@ async function renderSettingsPanel() {
             saveExtensionSettings();
         });
 
+    $('#bai_bai_toolkit_translate_message_updated_optimization_enabled')
+        .prop('checked', settings.translateMessageUpdatedOptimizationEnabled)
+        .on('input', function () {
+            settings.translateMessageUpdatedOptimizationEnabled = Boolean($(this).prop('checked'));
+            saveExtensionSettings();
+            applyTranslateMessageUpdatedOptimization();
+        });
+
+    $('#bai_bai_toolkit_long_chat_dom_render_optimization_enabled')
+        .prop('checked', settings.longChatDomRenderOptimizationEnabled)
+        .on('input', function () {
+            settings.longChatDomRenderOptimizationEnabled = Boolean($(this).prop('checked'));
+            saveExtensionSettings();
+            applyLongChatDomRenderOptimization();
+        });
+
+    $('#bai_bai_toolkit_perf_trace_start')
+        .on('click', function () {
+            if ($(this).hasClass('disabled')) {
+                return;
+            }
+            startPerformanceTrace();
+        });
+
+    $('#bai_bai_toolkit_perf_trace_stop')
+        .on('click', function () {
+            if ($(this).hasClass('disabled')) {
+                return;
+            }
+            stopPerformanceTraceAndExport();
+        });
+
+    updatePerformanceTraceControls();
+
     $('#bai_bai_toolkit_chat_list_scroll_optimization_enabled')
         .prop('checked', settings.chatListScrollOptimizationEnabled)
         .on('input', function () {
@@ -834,8 +2116,557 @@ function applyFeatureSettings() {
     applyPresetSaveOptimization();
     applyWelcomeRecentChatDirectOpenOptimization();
     applyChatDeleteEditFlowOptimization();
+    applyTranslateMessageUpdatedOptimization();
+    applyLongChatDomRenderOptimization();
     applyMobileAutoKeyboardSuppression();
     applyMobileMessageEditScrollGuard();
+}
+
+function applyLongChatDomRenderOptimization() {
+    if (!settings.longChatDomRenderOptimizationEnabled) {
+        removeLongChatDomRenderOptimization();
+        return;
+    }
+
+    installLongChatDomRenderOptimization();
+    scheduleLongChatDomRenderRefresh({ autoScroll: true, reason: 'apply' });
+}
+
+function getLongChatDomRenderState() {
+    if (!extensionState.longChatDomRenderOptimization || typeof extensionState.longChatDomRenderOptimization !== 'object') {
+        extensionState.longChatDomRenderOptimization = {};
+    }
+
+    const state = extensionState.longChatDomRenderOptimization;
+    if (!(state.heightCache instanceof Map)) {
+        state.heightCache = new Map();
+    }
+    if (!Array.isArray(state.eventHandlers)) {
+        state.eventHandlers = [];
+    }
+
+    return state;
+}
+
+function installLongChatDomRenderOptimization() {
+    const state = getLongChatDomRenderState();
+
+    applyLongChatDomRenderOptimizationStyle();
+    ensureLongChatDomRenderObservers();
+
+    if (!state.installed) {
+        const chatLoadHandler = () => {
+            state.userScrolledAway = false;
+            scheduleLongChatDomRenderRefresh({ autoScroll: true, reason: 'chat-load' });
+        };
+        const chatMutationHandler = () => {
+            scheduleLongChatDomRenderRefresh({ autoScroll: false, reason: 'chat-update' });
+        };
+
+        addLongChatDomRenderEventHandler(event_types.CHAT_CHANGED, chatLoadHandler);
+        addLongChatDomRenderEventHandler(event_types.CHAT_LOADED, chatLoadHandler);
+        addLongChatDomRenderEventHandler(event_types.MORE_MESSAGES_LOADED, chatMutationHandler);
+        addLongChatDomRenderEventHandler(event_types.USER_MESSAGE_RENDERED, chatMutationHandler);
+        addLongChatDomRenderEventHandler(event_types.CHARACTER_MESSAGE_RENDERED, chatMutationHandler);
+        addLongChatDomRenderEventHandler(event_types.MESSAGE_UPDATED, chatMutationHandler);
+        addLongChatDomRenderEventHandler(event_types.MESSAGE_DELETED, chatMutationHandler);
+
+        state.installed = true;
+    }
+}
+
+function addLongChatDomRenderEventHandler(event, handler) {
+    if (!event || typeof eventSource?.on !== 'function') {
+        return;
+    }
+
+    const state = getLongChatDomRenderState();
+    eventSource.on(event, handler);
+    state.eventHandlers.push({ event, handler });
+}
+
+function removeLongChatDomRenderOptimization() {
+    const state = getLongChatDomRenderState();
+
+    clearTimeout(state.refreshTimer);
+    state.refreshTimer = null;
+    clearLongChatDomRenderAutoScrollTimers();
+
+    for (const entry of state.eventHandlers || []) {
+        eventSource.removeListener?.(entry.event, entry.handler);
+    }
+    state.eventHandlers = [];
+    state.installed = false;
+    state.userScrolledAway = false;
+
+    detachLongChatDomRenderChatObservers();
+    state.resizeObserver?.disconnect();
+    state.resizeObserver = null;
+    state.mutationObserver?.disconnect();
+    state.mutationObserver = null;
+
+    document.getElementById(LONG_CHAT_DOM_RENDER_STYLE_ID)?.remove();
+    cleanupLongChatDomRenderMessages();
+}
+
+function applyLongChatDomRenderOptimizationStyle() {
+    let style = document.getElementById(LONG_CHAT_DOM_RENDER_STYLE_ID);
+    if (!style) {
+        style = document.createElement('style');
+        style.id = LONG_CHAT_DOM_RENDER_STYLE_ID;
+        document.head.append(style);
+    }
+
+    style.textContent = `
+#chat.bai-bai-toolkit-long-chat-render-optimized > .mes.bai-bai-toolkit-long-chat-contained {
+    content-visibility: auto;
+    contain: layout paint style;
+    contain-intrinsic-size: auto var(${LONG_CHAT_DOM_RENDER_HEIGHT_VAR}, 640px);
+    contain-intrinsic-block-size: auto var(${LONG_CHAT_DOM_RENDER_HEIGHT_VAR}, 640px);
+}
+
+#chat.${LONG_CHAT_DOM_RENDER_BOTTOM_ANCHORED_CLASS} > :not(.${LONG_CHAT_DOM_RENDER_BOTTOM_ANCHOR_CLASS}) {
+    overflow-anchor: none;
+}
+
+#chat > .${LONG_CHAT_DOM_RENDER_BOTTOM_ANCHOR_CLASS} {
+    display: block;
+    width: 1px;
+    height: 1px;
+    flex: 0 0 auto;
+    overflow-anchor: auto;
+    pointer-events: none;
+}
+`;
+}
+
+function ensureLongChatDomRenderObservers() {
+    const state = getLongChatDomRenderState();
+    const chat = document.querySelector('#chat');
+
+    if (!(chat instanceof HTMLElement)) {
+        return;
+    }
+
+    if (state.chatElement !== chat) {
+        detachLongChatDomRenderChatObservers();
+        state.mutationObserver?.disconnect();
+        state.mutationObserver = null;
+        state.chatElement = chat;
+        state.scrollHandler = () => {
+            handleLongChatDomRenderScroll(chat);
+        };
+        chat.addEventListener('scroll', state.scrollHandler, { passive: true });
+    }
+
+    if (!state.resizeObserver && typeof ResizeObserver === 'function') {
+        state.resizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                updateLongChatDomRenderHeightCache(entry.target, entry.contentRect?.height);
+            }
+        });
+    }
+
+    if (!state.mutationObserver && typeof MutationObserver === 'function') {
+        state.mutationObserver = new MutationObserver((mutations) => {
+            if (mutations.some(isLongChatDomRenderRelevantChildMutation)) {
+                if (!chat.classList.contains('bai-bai-toolkit-long-chat-render-optimized')) {
+                    return;
+                }
+                scheduleLongChatDomRenderRefresh({ autoScroll: false, reason: 'mutation' });
+            }
+        });
+        state.mutationObserver.observe(chat, { childList: true });
+    }
+}
+
+function isLongChatDomRenderRelevantChildMutation(mutation) {
+    const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
+    return nodes.some(node => !(node instanceof HTMLElement && node.classList.contains(LONG_CHAT_DOM_RENDER_BOTTOM_ANCHOR_CLASS)));
+}
+
+function detachLongChatDomRenderChatObservers() {
+    const state = getLongChatDomRenderState();
+    if (state.chatElement && state.scrollHandler) {
+        state.chatElement.removeEventListener('scroll', state.scrollHandler);
+    }
+    state.chatElement = null;
+    state.scrollHandler = null;
+}
+
+function scheduleLongChatDomRenderRefresh({ autoScroll = false, reason = '' } = {}) {
+    if (!settings.longChatDomRenderOptimizationEnabled) {
+        return;
+    }
+
+    const state = getLongChatDomRenderState();
+    state.pendingAutoScroll = Boolean(state.pendingAutoScroll || autoScroll);
+    state.pendingReason = reason || state.pendingReason || '';
+
+    clearTimeout(state.refreshTimer);
+    state.refreshTimer = setTimeout(() => {
+        state.refreshTimer = null;
+        const pendingReason = state.pendingReason || 'refresh';
+        refreshLongChatDomRenderOptimization({ reason: pendingReason });
+
+        if (state.pendingAutoScroll) {
+            state.pendingAutoScroll = false;
+            scheduleLongChatDomRenderScrollToBottom(pendingReason);
+        }
+        state.pendingReason = '';
+    }, 40);
+}
+
+function refreshLongChatDomRenderOptimization({ reason = '' } = {}) {
+    if (!settings.longChatDomRenderOptimizationEnabled) {
+        return;
+    }
+
+    const startedAt = performance.now();
+    const refreshStats = {
+        reason,
+        duration: 0,
+        messages: 0,
+        optimized: false,
+        contained: 0,
+        editing: 0,
+        cached: 0,
+        estimated: 0,
+    };
+
+    ensureLongChatDomRenderObservers();
+
+    const chatElement = document.querySelector('#chat');
+    if (!(chatElement instanceof HTMLElement)) {
+        return;
+    }
+
+    const messages = [...chatElement.querySelectorAll('.mes')].filter(element => element instanceof HTMLElement);
+    const chat = Array.isArray(scriptModule.chat) ? scriptModule.chat : [];
+    const stats = calculateVisibleMessageTextStats(chat, messages);
+    const shouldOptimize = shouldOptimizeLongChatDomRender(stats, messages.length);
+
+    refreshStats.messages = messages.length;
+    refreshStats.optimized = shouldOptimize;
+    chatElement.classList.toggle('bai-bai-toolkit-long-chat-render-optimized', shouldOptimize);
+
+    const state = getLongChatDomRenderState();
+    const editingMessages = getLongChatDomRenderEditingMessages(chatElement);
+    const chatWidth = chatElement.clientWidth || window.innerWidth;
+    for (const element of messages) {
+        if (shouldOptimize) {
+            applyLongChatDomRenderToMessage(element, chat, refreshStats, { editingMessages, chatWidth });
+            state.resizeObserver?.observe(element);
+        } else {
+            cleanupLongChatDomRenderMessage(element);
+            state.resizeObserver?.unobserve(element);
+        }
+    }
+
+    refreshStats.duration = performance.now() - startedAt;
+    recordPerformanceTraceLongDomRefresh(refreshStats);
+}
+
+function shouldOptimizeLongChatDomRender(stats, messageCount) {
+    return stats.visibleTextChars >= LONG_CHAT_DOM_RENDER_TEXT_THRESHOLD
+        || stats.maxVisibleChars >= LONG_CHAT_DOM_RENDER_SINGLE_MESSAGE_THRESHOLD
+        || (messageCount >= LONG_CHAT_DOM_RENDER_MESSAGE_COUNT_THRESHOLD && stats.visibleTextChars >= LONG_CHAT_DOM_RENDER_MIN_TEXT_THRESHOLD);
+}
+
+function applyLongChatDomRenderToMessage(element, chat, refreshStats = null, options = {}) {
+    if (!(element instanceof HTMLElement)) {
+        return;
+    }
+
+    if (options.editingMessages?.has(element)) {
+        cleanupLongChatDomRenderMessage(element);
+        if (refreshStats) {
+            refreshStats.editing += 1;
+        }
+        return;
+    }
+
+    const mesId = element.getAttribute('mesid') || '';
+    const index = Number(mesId);
+    const message = Number.isInteger(index) ? chat[index] : null;
+    const chars = getLongChatMessageTextLength(message);
+    const cachedHeight = getLongChatDomRenderCachedHeight(mesId);
+    const estimatedHeight = estimateLongChatDomRenderMessageHeight(chars, options.chatWidth);
+    const height = Math.max(cachedHeight || 0, estimatedHeight);
+
+    if (refreshStats) {
+        if (cachedHeight) {
+            refreshStats.cached += 1;
+        } else {
+            refreshStats.estimated += 1;
+        }
+    }
+
+    if (height > 0) {
+        setLongChatDomRenderCachedHeight(mesId, height);
+        element.style.setProperty(LONG_CHAT_DOM_RENDER_HEIGHT_VAR, `${Math.round(height)}px`);
+    }
+
+    element.classList.add('bai-bai-toolkit-long-chat-contained');
+    if (refreshStats) {
+        refreshStats.contained += 1;
+    }
+}
+
+function getLongChatDomRenderEditingMessages(chatElement) {
+    const messages = new Set();
+
+    if (!(chatElement instanceof HTMLElement)) {
+        return messages;
+    }
+
+    for (const editor of chatElement.querySelectorAll(MOBILE_MESSAGE_EDIT_SELECTOR)) {
+        const message = editor.closest('.mes');
+        if (message instanceof HTMLElement) {
+            messages.add(message);
+        }
+    }
+
+    return messages;
+}
+
+function estimateLongChatDomRenderMessageHeight(chars, width = window.innerWidth) {
+    const charsPerLine = Math.max(22, Math.min(80, Math.floor((width || 720) / 14)));
+    const lines = Math.max(1, Math.ceil(Number(chars || 0) / charsPerLine));
+    const estimated = 140 + (lines * 23);
+
+    return Math.max(120, Math.min(12000, estimated));
+}
+
+function updateLongChatDomRenderHeightCache(target, observedHeight) {
+    if (!(target instanceof HTMLElement) || !target.classList.contains('mes')) {
+        return;
+    }
+
+    const mesId = target.getAttribute('mesid') || '';
+    const height = Number(observedHeight || 0);
+    if (!mesId || height < 24 || !isLongChatDomRenderNearViewport(target)) {
+        return;
+    }
+
+    setLongChatDomRenderCachedHeight(mesId, height);
+    target.style.setProperty(LONG_CHAT_DOM_RENDER_HEIGHT_VAR, `${Math.round(height)}px`);
+}
+
+function isLongChatDomRenderNearViewport(element) {
+    const rect = element.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 800;
+    return rect.bottom >= -viewportHeight && rect.top <= viewportHeight * 2;
+}
+
+function getLongChatDomRenderCachedHeight(mesId) {
+    if (!mesId) {
+        return 0;
+    }
+
+    const state = getLongChatDomRenderState();
+    return Number(state.heightCache.get(String(mesId)) || 0);
+}
+
+function setLongChatDomRenderCachedHeight(mesId, height) {
+    if (!mesId || !Number.isFinite(height) || height <= 0) {
+        return;
+    }
+
+    const state = getLongChatDomRenderState();
+    state.heightCache.set(String(mesId), Math.round(height));
+
+    while (state.heightCache.size > 1000) {
+        const oldestKey = state.heightCache.keys().next().value;
+        state.heightCache.delete(oldestKey);
+    }
+}
+
+function cleanupLongChatDomRenderMessages() {
+    removeLongChatDomRenderBottomAnchor();
+    document.querySelector('#chat')?.classList.remove('bai-bai-toolkit-long-chat-render-optimized');
+    for (const element of document.querySelectorAll('#chat .mes.bai-bai-toolkit-long-chat-contained')) {
+        cleanupLongChatDomRenderMessage(element);
+    }
+}
+
+function cleanupLongChatDomRenderMessage(element) {
+    if (!(element instanceof HTMLElement)) {
+        return;
+    }
+
+    element.classList.remove('bai-bai-toolkit-long-chat-contained');
+    element.style.removeProperty(LONG_CHAT_DOM_RENDER_HEIGHT_VAR);
+}
+
+function scheduleLongChatDomRenderScrollToBottom(reason = '') {
+    const state = getLongChatDomRenderState();
+    clearLongChatDomRenderAutoScrollTimers();
+    state.autoScrollToken = Number(state.autoScrollToken || 0) + 1;
+    const token = state.autoScrollToken;
+    state.autoScrollStartedAt = performance.now();
+    state.autoScrollLastHeight = 0;
+    state.autoScrollStableFrames = 0;
+    state.autoScrollLogged = false;
+
+    settleLongChatDomRenderScrollToBottom(token, reason);
+}
+
+function clearLongChatDomRenderAutoScrollTimers() {
+    const state = getLongChatDomRenderState();
+    for (const timer of state.autoScrollTimers || []) {
+        clearTimeout(timer);
+    }
+    state.autoScrollTimers = [];
+
+    if (state.autoScrollFrame) {
+        cancelAnimationFrame(state.autoScrollFrame);
+        state.autoScrollFrame = 0;
+    }
+
+    restoreLongChatDomRenderScrollBehavior(state);
+}
+
+function settleLongChatDomRenderScrollToBottom(token, reason = '') {
+    const state = getLongChatDomRenderState();
+    const chat = document.querySelector('#chat');
+
+    if (!(chat instanceof HTMLElement)
+        || token !== state.autoScrollToken
+        || !settings.longChatDomRenderOptimizationEnabled
+        || state.userScrolledAway) {
+        restoreLongChatDomRenderScrollBehavior(state);
+        return;
+    }
+
+    ensureLongChatDomRenderInstantScroll(chat, state);
+    ensureLongChatDomRenderBottomAnchor(chat, state);
+
+    const now = performance.now();
+    state.programmaticScrollUntil = now + 250;
+
+    const desiredTop = Math.max(0, chat.scrollHeight - chat.clientHeight);
+    const distance = Math.abs(chat.scrollTop - desiredTop);
+    const heightDelta = Math.abs(Number(state.autoScrollLastHeight || 0) - chat.scrollHeight);
+
+    if (distance > LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_TOLERANCE) {
+        chat.scrollTop = desiredTop;
+        state.autoScrollStableFrames = 0;
+    } else if (heightDelta > LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_TOLERANCE) {
+        state.autoScrollStableFrames = 0;
+    } else {
+        state.autoScrollStableFrames = Number(state.autoScrollStableFrames || 0) + 1;
+    }
+
+    state.autoScrollLastHeight = chat.scrollHeight;
+
+    const elapsed = now - Number(state.autoScrollStartedAt || now);
+    if (elapsed < LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_SETTLE_MS
+        && Number(state.autoScrollStableFrames || 0) < LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_STABLE_FRAMES) {
+        state.autoScrollFrame = requestAnimationFrame(() => {
+            state.autoScrollFrame = 0;
+            settleLongChatDomRenderScrollToBottom(token, reason);
+        });
+        return;
+    }
+
+    restoreLongChatDomRenderScrollBehavior(state, { finalScrollToBottom: true });
+
+    if (!state.autoScrollLogged) {
+        state.autoScrollLogged = true;
+        console.debug(`${LOG_PREFIX} Long chat DOM render optimization scrolled to bottom (${reason})`);
+    }
+}
+
+function ensureLongChatDomRenderInstantScroll(chat, state) {
+    if (!(chat instanceof HTMLElement) || state.autoScrollChatElement === chat) {
+        return;
+    }
+
+    restoreLongChatDomRenderScrollBehavior(state);
+    state.autoScrollChatElement = chat;
+    state.autoScrollPreviousScrollBehavior = chat.style.scrollBehavior || '';
+    chat.style.scrollBehavior = 'auto';
+}
+
+function ensureLongChatDomRenderBottomAnchor(chat, state) {
+    if (!(chat instanceof HTMLElement)) {
+        return;
+    }
+
+    let anchor = state.bottomAnchorElement;
+    if (!(anchor instanceof HTMLElement)) {
+        anchor = document.createElement('div');
+        anchor.className = LONG_CHAT_DOM_RENDER_BOTTOM_ANCHOR_CLASS;
+        anchor.setAttribute('aria-hidden', 'true');
+        state.bottomAnchorElement = anchor;
+    }
+
+    if (anchor.parentElement !== chat || chat.lastElementChild !== anchor) {
+        chat.append(anchor);
+    }
+
+    chat.classList.add(LONG_CHAT_DOM_RENDER_BOTTOM_ANCHORED_CLASS);
+}
+
+function removeLongChatDomRenderBottomAnchor(state = getLongChatDomRenderState()) {
+    const anchor = state.bottomAnchorElement;
+    if (anchor instanceof HTMLElement) {
+        anchor.parentElement?.classList.remove(LONG_CHAT_DOM_RENDER_BOTTOM_ANCHORED_CLASS);
+        anchor.remove();
+    }
+
+    document.querySelector('#chat')?.classList.remove(LONG_CHAT_DOM_RENDER_BOTTOM_ANCHORED_CLASS);
+    state.bottomAnchorElement = null;
+}
+
+function restoreLongChatDomRenderScrollBehavior(state = getLongChatDomRenderState(), { finalScrollToBottom = false } = {}) {
+    const chat = state.autoScrollChatElement;
+    if (chat instanceof HTMLElement) {
+        if (finalScrollToBottom) {
+            chat.scrollTop = Math.max(0, chat.scrollHeight - chat.clientHeight);
+        }
+        removeLongChatDomRenderBottomAnchor(state);
+        if (finalScrollToBottom) {
+            chat.scrollTop = Math.max(0, chat.scrollHeight - chat.clientHeight);
+        }
+        chat.style.scrollBehavior = state.autoScrollPreviousScrollBehavior || '';
+    } else {
+        removeLongChatDomRenderBottomAnchor(state);
+    }
+
+    state.autoScrollChatElement = null;
+    state.autoScrollPreviousScrollBehavior = '';
+}
+
+function handleLongChatDomRenderScroll(chat) {
+    const state = getLongChatDomRenderState();
+    if (performance.now() < Number(state.programmaticScrollUntil || 0)) {
+        return;
+    }
+
+    state.userScrolledAway = !isLongChatDomRenderAtBottom(chat);
+}
+
+function isLongChatDomRenderAtBottom(chat) {
+    if (!(chat instanceof HTMLElement)) {
+        return true;
+    }
+
+    return chat.scrollHeight - chat.scrollTop - chat.clientHeight <= 48;
+}
+
+function getLongChatMessageTextLength(message) {
+    if (!message || typeof message !== 'object') {
+        return 0;
+    }
+
+    let length = typeof message.mes === 'string' ? message.mes.length : 0;
+    length += typeof message.extra?.reasoning === 'string' ? message.extra.reasoning.length : 0;
+    length += typeof message.extra?.display_text === 'string' ? message.extra.display_text.length : 0;
+    length += typeof message.extra?.reasoning_display_text === 'string' ? message.extra.reasoning_display_text.length : 0;
+
+    return length;
 }
 
 function applyCustomCssInputOptimization() {
@@ -6616,7 +8447,8 @@ function installSaveRequestGzipFetchHook() {
                 return state.originalFetch(input, init);
             }
 
-            if (!getSaveRequestGzipUrl(input)) {
+            const gzipUrl = getSaveRequestGzipUrl(input);
+            if (!gzipUrl) {
                 return state.originalFetch(input, init);
             }
 
@@ -6635,7 +8467,11 @@ function installSaveRequestGzipFetchHook() {
                 return state.originalFetch(input, init);
             }
 
-            const compressedBody = await gzipFetchBody(bodyInfo.body);
+            const compressedBody = await gzipFetchBody(bodyInfo.body, {
+                method,
+                path: gzipUrl.pathname,
+                caller: getPerformanceTraceStackSummary(),
+            });
             if (!compressedBody) {
                 return state.originalFetch(input, init);
             }
@@ -6812,16 +8648,37 @@ async function getCompressibleFetchBody(input, init) {
     return bodyBlob.size > 0 ? { body: bodyBlob, contentType: bodyBlob.type || '' } : null;
 }
 
-async function gzipFetchBody(body) {
+async function gzipFetchBody(body, traceInfo = {}) {
     if (typeof CompressionStream !== 'function') {
         return null;
     }
 
     const source = isFetchBlob(body) ? body : new Blob([body]);
-    const compressedStream = source.stream().pipeThrough(new CompressionStream('gzip'));
-    const compressedBlob = await new Response(compressedStream).blob();
+    const startedAt = performance.now();
 
-    return compressedBlob.size > 0 ? compressedBlob : null;
+    try {
+        const compressedStream = source.stream().pipeThrough(new CompressionStream('gzip'));
+        const compressedBlob = await new Response(compressedStream).blob();
+        recordPerformanceTraceGzipCompression({
+            ...traceInfo,
+            startedAt,
+            duration: performance.now() - startedAt,
+            originalBytes: source.size,
+            compressedBytes: compressedBlob.size,
+        });
+
+        return compressedBlob.size > 0 ? compressedBlob : null;
+    } catch (error) {
+        recordPerformanceTraceGzipCompression({
+            ...traceInfo,
+            startedAt,
+            duration: performance.now() - startedAt,
+            originalBytes: source.size,
+            compressedBytes: 0,
+            caller: `${traceInfo?.caller || ''} error=${error?.message || error}`,
+        });
+        throw error;
+    }
 }
 
 function buildUncompressedSaveRequestRetry(input, init, method, originalHeaders, bodyInfo) {

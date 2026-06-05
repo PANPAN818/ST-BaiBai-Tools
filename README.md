@@ -2,7 +2,7 @@
 
 This extension packages a small set of SillyTavern responsiveness fixes as a third-party extension.
 
-Current version: `0.19.0`
+Current version: `0.20.0`
 
 What it does:
 
@@ -10,6 +10,8 @@ What it does:
 - Replaces the stock `power-user` window `resize` handler with a version that exits early on mobile before expensive autocomplete and hotswap refresh work runs
 - Speeds up opening the chat file manager for normal character chats by rendering a lightweight file-name list first, then using one full metadata request to fill in file size, message count, date, and preview text
 - Opens normal character recent chats from the welcome page directly to the clicked chat file, avoiding an intermediate render of the character's previously active chat
+- Skips unnecessary translation extension work on message update events when automatic translation is disabled and the message has no translated display cache, avoiding repeated full-chat saves in long chats
+- Optimizes long-chat DOM rendering by auto-scrolling to the bottom after chat load, applying `content-visibility` to visible message floors when the current DOM text volume is high, caching placeholder heights, and using a temporary bottom anchor while the initial bottom scroll settles
 - Speeds up opening and closing World Info entry editors by skipping the expensive height animation for top-level entry drawers, keeping initialized editors alive while collapsed, and lazily initializing heavier Select2 controls and character filter options
 - Speeds up OpenAI preset switching by letting the mobile preset select close first, rendering the prompt list immediately, suppressing the stock one-second delayed rebuild for that switch, and refreshing token counts afterward
 - Replaces prompt preset dragging with a non-reflow drag preview that moves a floating clone, shows an insertion line, and only reorders the list when dropped
@@ -42,6 +44,10 @@ The prompt preset content CodeMirror editor is enabled by default. It replaces t
 The prompt entry auto-save feature is disabled by default. When enabled, saving an OpenAI prompt entry also triggers the current OpenAI preset save action after the prompt edit has been written.
 
 The delete-message edit flow optimization only applies shortly after confirming SillyTavern's delete-message dialog. It opens the requested message editor directly during that cleanup window, then delays common send, regenerate, continue, and impersonate clicks until the fast-opened edit has been submitted. The feature switch preserves SillyTavern's original behavior when disabled.
+
+The translation update-event save optimization is enabled by default. It only skips the translation extension's `MESSAGE_UPDATED` listener when automatic translation is off and the updated message does not already have translated display text. When translation automation or cached translation output is present, the original listener still runs.
+
+The long-chat DOM render optimization is enabled by default. It activates only when the currently rendered chat floor text is large enough, then applies `content-visibility` and intrinsic height hints to message floors to reduce off-screen layout and paint work. During initial chat load it uses a temporary bottom anchor so late height changes keep the bottom pinned; the anchor is removed after the initial bottom scroll settles.
 
 For local testing inside this repository, the extension can live under:
 
