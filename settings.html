@@ -20,9 +20,13 @@
                     <input id="bai_bai_toolkit_resize_guard_enabled" type="checkbox" class="checkbox">
                     <span>输入框响应优化</span>
                 </label>
-                <label class="checkbox_label" for="bai_bai_toolkit_textarea_scroll_optimization_enabled" title="减少手机端角色描述编辑框内部滚动时的隐藏光标定位计算，并降低长文本滚动的绘制成本。">
-                    <input id="bai_bai_toolkit_textarea_scroll_optimization_enabled" type="checkbox" class="checkbox">
-                    <span>角色描述滚动优化</span>
+                <label class="checkbox_label" for="bai_bai_toolkit_description_codemirror_editor_enabled" title="使用 CodeMirror 6 替代原生 textarea 编辑角色描述；加载失败时直接恢复 ST 原版输入框。">
+                    <input id="bai_bai_toolkit_description_codemirror_editor_enabled" type="checkbox" class="checkbox">
+                    <span>角色描述 CodeMirror 编辑器</span>
+                </label>
+                <label class="checkbox_label" for="bai_bai_toolkit_custom_css_input_optimization_enabled" title="编辑用户设置里的自定义 CSS 时，使用 CodeMirror 接管可见编辑器，并在离开编辑框后再应用整段样式。">
+                    <input id="bai_bai_toolkit_custom_css_input_optimization_enabled" type="checkbox" class="checkbox">
+                    <span>自定义CSS CodeMirror 编辑器</span>
                 </label>
                 <label class="checkbox_label" for="bai_bai_toolkit_world_info_drawer_optimization_enabled" title="世界书条目展开/收起时跳过高度动画，保留已初始化的编辑区，并延迟初始化部分较重的下拉控件和角色过滤选项。">
                     <input id="bai_bai_toolkit_world_info_drawer_optimization_enabled" type="checkbox" class="checkbox">

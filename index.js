@@ -30,9 +30,14 @@ const SETTINGS_KEY = 'baiBaiToolkit';
 const EXTENSION_KEY = '__baiBaiToolkitExtensionInstalled';
 const FAST_CHAT_SEARCH_FETCH_KEY = '__baiBaiToolkitFastChatSearchFetchPatched';
 const SAVE_REQUEST_GZIP_FETCH_KEY = '__baiBaiToolkitSaveRequestGzipFetchPatched';
+const CUSTOM_CSS_INPUT_OPTIMIZATION_KEY = '__baiBaiToolkitCustomCssInputOptimized';
+const CUSTOM_CSS_CODEMIRROR_EDITOR_KEY = '__baiBaiToolkitCustomCssCodeMirrorEditor';
 const FAST_CHAT_LIST_SCROLL_STYLE_ID = 'bai_bai_toolkit_fast_chat_list_scroll_style';
-const TEXTAREA_SCROLL_OPTIMIZATION_STYLE_ID = 'bai_bai_toolkit_textarea_scroll_style';
+const DESCRIPTION_CODEMIRROR_EDITOR_STYLE_ID = 'bai_bai_toolkit_description_codemirror_editor_style';
+const CUSTOM_CSS_CODEMIRROR_EDITOR_STYLE_ID = 'bai_bai_toolkit_custom_css_codemirror_editor_style';
 const PRESET_SCROLL_STYLE_ID = 'bai_bai_toolkit_preset_scroll_style';
+const DESCRIPTION_CODEMIRROR_EDITOR_KEY = '__baiBaiToolkitDescriptionCodeMirrorEditor';
+const DESCRIPTION_CODEMIRROR_MODULES_KEY = '__baiBaiToolkitDescriptionCodeMirrorModules';
 const PRESET_SWITCH_BEFORE_HANDLER_KEY = '__baiBaiToolkitPresetSwitchBeforeHandler';
 const PRESET_SWITCH_HANDLER_KEY = '__baiBaiToolkitPresetSwitchHandler';
 const PRESET_SELECT_CHANGE_HANDLER_KEY = '__baiBaiToolkitPresetSelectChangeHandler';
@@ -61,6 +66,32 @@ const MOBILE_MESSAGE_EDIT_SELECTOR = '#curEditTextarea, .reasoning_edit_textarea
 const MOBILE_AUTO_KEYBOARD_TARGET_SELECTOR = '#curEditTextarea, #select_chat_search';
 const MOBILE_CHAT_ENTRY_KEYBOARD_TARGET_SELECTOR = '#send_textarea';
 const MOBILE_DIRECT_KEYBOARD_TARGET_SELECTOR = `${MOBILE_AUTO_KEYBOARD_TARGET_SELECTOR}, ${MOBILE_CHAT_ENTRY_KEYBOARD_TARGET_SELECTOR}`;
+const DESCRIPTION_EDITOR_SOURCE_SELECTOR = '#description_textarea';
+const DESCRIPTION_EDITOR_SOURCE_HIDDEN_CLASS = 'bai-bai-toolkit-description-source-hidden';
+const DESCRIPTION_CODEMIRROR_EDITOR_ID = 'bai_bai_description_codemirror_editor';
+const DESCRIPTION_CODEMIRROR_EDITOR_CLASS = 'bai-bai-toolkit-description-codemirror-editor';
+const DESCRIPTION_CODEMIRROR_BLUR_SAVE_DELAY_MS = 250;
+const DESCRIPTION_CODEMIRROR_HISTORY_MAX_LENGTH = 12000;
+const DESCRIPTION_CODEMIRROR_LOCAL_BUNDLE_PATH = './vendor/codemirror.bundle.js';
+const CUSTOM_CSS_INPUT_ID = 'customCSS';
+const CUSTOM_CSS_STYLE_ID = 'custom-style';
+const CUSTOM_CSS_CODEMIRROR_EDITOR_ID = 'bai_bai_custom_css_codemirror_editor';
+const CUSTOM_CSS_CODEMIRROR_EDITOR_CLASS = 'bai-bai-toolkit-custom-css-codemirror-editor';
+const CUSTOM_CSS_SOURCE_HIDDEN_CLASS = 'bai-bai-toolkit-custom-css-source-hidden';
+const CUSTOM_CSS_HOST_CLASS = 'bai-bai-toolkit-custom-css-host';
+const CUSTOM_CSS_LAYOUT_CLASS = 'bai-bai-toolkit-custom-css-layout';
+const CUSTOM_CSS_LIGHT_THEME_CLASS = 'bai-bai-toolkit-custom-css-theme-light';
+const CUSTOM_CSS_DARK_THEME_CLASS = 'bai-bai-toolkit-custom-css-theme-dark';
+const CUSTOM_CSS_DARK_BACKGROUND_LUMINANCE_THRESHOLD = 0.45;
+const DESCRIPTION_CODEMIRROR_CDN_MODULES = {
+    state: 'https://esm.sh/@codemirror/state@6?bundle',
+    view: 'https://esm.sh/@codemirror/view@6?bundle',
+    commands: 'https://esm.sh/@codemirror/commands@6?bundle',
+    css: 'https://esm.sh/@codemirror/lang-css@6?bundle',
+    language: 'https://esm.sh/@codemirror/language@6?bundle',
+    highlight: 'https://esm.sh/@lezer/highlight@1?bundle',
+    oneDark: 'https://esm.sh/@codemirror/theme-one-dark@6?bundle',
+};
 const createOrEditCharacter = scriptModule.createOrEditCharacter;
 const messageEdit = scriptModule.messageEdit;
 const COMPATIBILITY_MODE_BADGE_TEXT = '（兼容模式）';
@@ -107,7 +138,8 @@ const SAVE_REQUEST_GZIP_PATHS = new Set([
 ]);
 const defaultSettings = {
     resizeGuardEnabled: true,
-    textareaScrollOptimizationEnabled: true,
+    descriptionCodeMirrorEditorEnabled: true,
+    customCssInputOptimizationEnabled: true,
     worldInfoDrawerOptimizationEnabled: true,
     fastChatListEnabled: true,
     welcomeRecentChatDirectOpenEnabled: true,
@@ -123,6 +155,10 @@ const defaultSettings = {
     chatDeleteEditFlowOptimizationEnabled: true,
 };
 const legacySettingsKeys = [
+    'textareaScrollOptimizationEnabled',
+    'descriptionShadowEditorEnabled',
+    'descriptionInputBubbleOptimizationEnabled',
+    'descriptionInputIdleSaveEnabled',
     'imeCommitOptimizationEnabled',
     'mobileChatEntryKeyboardSuppressionEnabled',
 ];
@@ -461,12 +497,20 @@ async function renderSettingsPanel() {
             applyFeatureSettings();
         });
 
-    $('#bai_bai_toolkit_textarea_scroll_optimization_enabled')
-        .prop('checked', settings.textareaScrollOptimizationEnabled)
+    $('#bai_bai_toolkit_description_codemirror_editor_enabled')
+        .prop('checked', settings.descriptionCodeMirrorEditorEnabled)
         .on('input', function () {
-            settings.textareaScrollOptimizationEnabled = Boolean($(this).prop('checked'));
+            settings.descriptionCodeMirrorEditorEnabled = Boolean($(this).prop('checked'));
             saveExtensionSettings();
-            applyTextareaScrollOptimization();
+            applyDescriptionCodeMirrorEditorOptimization();
+        });
+
+    $('#bai_bai_toolkit_custom_css_input_optimization_enabled')
+        .prop('checked', settings.customCssInputOptimizationEnabled)
+        .on('input', function () {
+            settings.customCssInputOptimizationEnabled = Boolean($(this).prop('checked'));
+            saveExtensionSettings();
+            applyCustomCssInputOptimization();
         });
 
     $('#bai_bai_toolkit_world_info_drawer_optimization_enabled')
@@ -717,7 +761,8 @@ function applyFeatureSettings() {
     applyWorldInfoDrawerOptimization();
     applyWorldInfoLazySelect2Optimization();
     applyWorldInfoCharacterFilterOptionsOptimization();
-    applyTextareaScrollOptimization();
+    applyDescriptionCodeMirrorEditorOptimization();
+    applyCustomCssInputOptimization();
     applyPresetScrollOptimization();
     applyPresetSwitchOptimization();
     applyPresetToggleOptimization();
@@ -726,6 +771,1027 @@ function applyFeatureSettings() {
     applyChatDeleteEditFlowOptimization();
     applyMobileAutoKeyboardSuppression();
     applyMobileMessageEditScrollGuard();
+}
+
+function applyCustomCssInputOptimization() {
+    if (settings.customCssInputOptimizationEnabled) {
+        installCustomCssInputOptimization();
+        installCustomCssCodeMirrorEditorOptimization();
+    } else {
+        removeCustomCssCodeMirrorEditorOptimization();
+        removeCustomCssInputOptimization();
+    }
+}
+
+function installCustomCssInputOptimization() {
+    if (extensionState[CUSTOM_CSS_INPUT_OPTIMIZATION_KEY]) {
+        return;
+    }
+
+    const inputHandler = (event) => {
+        const input = getCustomCssInputFromEvent(event);
+
+        if (!input) {
+            return;
+        }
+
+        event.stopImmediatePropagation();
+
+        if (event.isComposing || extensionState.customCssInputComposing || extensionState.customCssInputCompositionCommitPending) {
+            return;
+        }
+
+        const codeMirrorSynced = syncCustomCssCodeMirrorFromExternalSource(input);
+
+        commitCustomCssInputValue(input);
+
+        if (codeMirrorSynced || !event.isTrusted) {
+            flushCustomCssApply();
+        }
+    };
+    const compositionStartHandler = (event) => {
+        if (getCustomCssInputFromEvent(event)) {
+            clearCustomCssCompositionEndTimer();
+            extensionState.customCssInputComposing = true;
+            extensionState.customCssInputCompositionCommitPending = false;
+        }
+    };
+    const compositionEndHandler = (event) => {
+        const input = getCustomCssInputFromEvent(event);
+
+        if (!input) {
+            return;
+        }
+
+        clearCustomCssCompositionEndTimer();
+        extensionState.customCssInputCompositionCommitPending = true;
+        extensionState.customCssCompositionEndTimer = setTimeout(() => {
+            extensionState.customCssCompositionEndTimer = null;
+            extensionState.customCssInputComposing = false;
+            extensionState.customCssInputCompositionCommitPending = false;
+            syncCustomCssCodeMirrorFromExternalSource(input);
+            commitCustomCssInputValue(input);
+        }, 0);
+    };
+    const flushHandler = (event) => {
+        const input = getCustomCssInputFromEvent(event);
+
+        if (input) {
+            extensionState.customCssInputComposing = false;
+            extensionState.customCssInputCompositionCommitPending = false;
+            clearCustomCssCompositionEndTimer();
+            commitCustomCssInputValue(input);
+            flushCustomCssApply();
+        }
+    };
+    const pageLifecycleHandler = () => {
+        flushCurrentCustomCssInput();
+    };
+
+    document.addEventListener('input', inputHandler, true);
+    document.addEventListener('compositionstart', compositionStartHandler, true);
+    document.addEventListener('compositionend', compositionEndHandler, true);
+    document.addEventListener('change', flushHandler, true);
+    document.addEventListener('blur', flushHandler, true);
+    window.addEventListener('pagehide', pageLifecycleHandler);
+    document.addEventListener('visibilitychange', pageLifecycleHandler);
+
+    extensionState[CUSTOM_CSS_INPUT_OPTIMIZATION_KEY] = {
+        inputHandler,
+        compositionStartHandler,
+        compositionEndHandler,
+        flushHandler,
+        pageLifecycleHandler,
+    };
+}
+
+function removeCustomCssInputOptimization() {
+    const state = extensionState[CUSTOM_CSS_INPUT_OPTIMIZATION_KEY];
+
+    if (!state) {
+        return;
+    }
+
+    flushCurrentCustomCssInput();
+    clearCustomCssCompositionEndTimer();
+    extensionState.customCssInputComposing = false;
+    extensionState.customCssInputCompositionCommitPending = false;
+    document.removeEventListener('input', state.inputHandler, true);
+    document.removeEventListener('compositionstart', state.compositionStartHandler, true);
+    document.removeEventListener('compositionend', state.compositionEndHandler, true);
+    document.removeEventListener('change', state.flushHandler, true);
+    document.removeEventListener('blur', state.flushHandler, true);
+    window.removeEventListener('pagehide', state.pageLifecycleHandler);
+    document.removeEventListener('visibilitychange', state.pageLifecycleHandler);
+    delete extensionState[CUSTOM_CSS_INPUT_OPTIMIZATION_KEY];
+}
+
+function getCustomCssInputFromEvent(event) {
+    const target = event.target;
+
+    if (!(target instanceof HTMLTextAreaElement) || target.id !== CUSTOM_CSS_INPUT_ID) {
+        return null;
+    }
+
+    return target;
+}
+
+function commitCustomCssInputValue(input) {
+    if (!(input instanceof HTMLTextAreaElement) || input.id !== CUSTOM_CSS_INPUT_ID) {
+        return;
+    }
+
+    power_user.custom_css = String(input.value);
+    saveSettingsDebounced();
+}
+
+function clearCustomCssCompositionEndTimer() {
+    if (extensionState.customCssCompositionEndTimer) {
+        clearTimeout(extensionState.customCssCompositionEndTimer);
+        extensionState.customCssCompositionEndTimer = null;
+    }
+}
+
+function flushCustomCssApply() {
+    applyCustomCssStyleText();
+}
+
+function flushCurrentCustomCssInput() {
+    if (flushCustomCssCodeMirrorEditor('current input flush', { apply: true, save: true })) {
+        return;
+    }
+
+    const input = document.getElementById(CUSTOM_CSS_INPUT_ID);
+
+    if (input instanceof HTMLTextAreaElement) {
+        extensionState.customCssInputComposing = false;
+        extensionState.customCssInputCompositionCommitPending = false;
+        clearCustomCssCompositionEndTimer();
+        commitCustomCssInputValue(input);
+    }
+
+    flushCustomCssApply();
+}
+
+function applyCustomCssStyleText() {
+    let style = document.getElementById(CUSTOM_CSS_STYLE_ID);
+
+    if (!style) {
+        style = document.createElement('style');
+        style.type = 'text/css';
+        style.id = CUSTOM_CSS_STYLE_ID;
+        document.head.append(style);
+    }
+
+    style.textContent = power_user.custom_css;
+}
+
+function installCustomCssCodeMirrorEditorOptimization() {
+    const state = getCustomCssCodeMirrorEditorState();
+    state.enabled = true;
+
+    applyCustomCssCodeMirrorEditorStyle();
+    installCustomCssCodeMirrorEditorGlobalListeners(state);
+    refreshCustomCssCodeMirrorEditorTarget(state);
+    installCustomCssCodeMirrorEditorMutationObserver(state);
+}
+
+function removeCustomCssCodeMirrorEditorOptimization() {
+    const state = extensionState[CUSTOM_CSS_CODEMIRROR_EDITOR_KEY];
+
+    if (!state) {
+        return;
+    }
+
+    flushCustomCssCodeMirrorEditor('disable', { apply: true, save: true });
+    state.enabled = false;
+
+    if (state.refreshFrame) {
+        cancelAnimationFrame(state.refreshFrame);
+        state.refreshFrame = 0;
+    }
+
+    state.mutationObserver?.disconnect();
+    state.mutationObserver = null;
+    detachCustomCssCodeMirrorEditor(state);
+
+    for (const listener of state.globalListeners || []) {
+        listener.target.removeEventListener(listener.type, listener.handler, listener.options);
+    }
+
+    state.globalListeners = [];
+    removeCustomCssCodeMirrorEditorStyle();
+    delete extensionState[CUSTOM_CSS_CODEMIRROR_EDITOR_KEY];
+}
+
+function getCustomCssCodeMirrorEditorState() {
+    if (!extensionState[CUSTOM_CSS_CODEMIRROR_EDITOR_KEY]) {
+        extensionState[CUSTOM_CSS_CODEMIRROR_EDITOR_KEY] = {
+            enabled: false,
+            source: null,
+            wrapper: null,
+            view: null,
+            listeners: [],
+            globalListeners: [],
+            mutationObserver: null,
+            refreshFrame: 0,
+            dirty: false,
+            flushing: false,
+            loadingToken: null,
+            colorScheme: 'light',
+        };
+    }
+
+    return extensionState[CUSTOM_CSS_CODEMIRROR_EDITOR_KEY];
+}
+
+function installCustomCssCodeMirrorEditorGlobalListeners(state) {
+    if (state.globalListeners.length > 0) {
+        return;
+    }
+
+    const clickHandler = (event) => {
+        if (event.target instanceof Element && event.target.closest(`.editor_maximize[data-for="${CUSTOM_CSS_INPUT_ID}"]`)) {
+            flushCustomCssCodeMirrorEditor('maximize click', { apply: true, save: true });
+        }
+    };
+    const pageLifecycleHandler = () => {
+        flushCustomCssCodeMirrorEditor('page lifecycle', { apply: true, save: true });
+    };
+
+    document.addEventListener('click', clickHandler, true);
+    window.addEventListener('pagehide', pageLifecycleHandler);
+    document.addEventListener('visibilitychange', pageLifecycleHandler);
+
+    state.globalListeners.push(
+        { target: document, type: 'click', handler: clickHandler, options: true },
+        { target: window, type: 'pagehide', handler: pageLifecycleHandler, options: undefined },
+        { target: document, type: 'visibilitychange', handler: pageLifecycleHandler, options: undefined },
+    );
+}
+
+function installCustomCssCodeMirrorEditorMutationObserver(state) {
+    if (state.mutationObserver || typeof MutationObserver !== 'function') {
+        return;
+    }
+
+    const root = document.body || document.documentElement;
+
+    if (!root) {
+        return;
+    }
+
+    state.mutationObserver = new MutationObserver((mutations) => {
+        if (areCustomCssCodeMirrorMutationsInternal(state, mutations)) {
+            return;
+        }
+
+        scheduleCustomCssCodeMirrorEditorRefresh(state);
+    });
+    state.mutationObserver.observe(root, { childList: true, subtree: true });
+}
+
+function areCustomCssCodeMirrorMutationsInternal(state, mutations) {
+    const wrapper = state.wrapper;
+
+    if (!(wrapper instanceof HTMLElement)) {
+        return false;
+    }
+
+    return mutations.every((mutation) => {
+        if (mutation.target instanceof Node && wrapper.contains(mutation.target)) {
+            return true;
+        }
+
+        for (const node of mutation.addedNodes) {
+            if (!(node instanceof Node) || !wrapper.contains(node)) {
+                return false;
+            }
+        }
+
+        for (const node of mutation.removedNodes) {
+            if (!(node instanceof Node) || !wrapper.contains(node)) {
+                return false;
+            }
+        }
+
+        return mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0;
+    });
+}
+
+function scheduleCustomCssCodeMirrorEditorRefresh(state = extensionState[CUSTOM_CSS_CODEMIRROR_EDITOR_KEY]) {
+    if (!state?.enabled || state.refreshFrame) {
+        return;
+    }
+
+    state.refreshFrame = requestAnimationFrame(() => {
+        state.refreshFrame = 0;
+        refreshCustomCssCodeMirrorEditorTarget(state);
+    });
+}
+
+function refreshCustomCssCodeMirrorEditorTarget(state) {
+    if (!state?.enabled) {
+        return;
+    }
+
+    const source = document.getElementById(CUSTOM_CSS_INPUT_ID);
+
+    if (!(source instanceof HTMLTextAreaElement) || !source.isConnected) {
+        detachCustomCssCodeMirrorEditor(state);
+        return;
+    }
+
+    if (state.source === source && state.wrapper?.isConnected) {
+        updateCustomCssCodeMirrorColorScheme(state, source, state.wrapper);
+        syncCustomCssCodeMirrorFromSourceIfClean(state);
+        return;
+    }
+
+    detachCustomCssCodeMirrorEditor(state);
+    attachCustomCssCodeMirrorEditor(state, source);
+}
+
+function attachCustomCssCodeMirrorEditor(state, source) {
+    const wrapper = document.createElement('div');
+
+    wrapper.id = CUSTOM_CSS_CODEMIRROR_EDITOR_ID;
+    wrapper.className = CUSTOM_CSS_CODEMIRROR_EDITOR_CLASS;
+    wrapper.textContent = 'Loading CodeMirror...';
+    updateCustomCssCodeMirrorColorScheme(state, source, wrapper);
+    source.classList.add(CUSTOM_CSS_SOURCE_HIDDEN_CLASS);
+    source.parentElement?.classList.add(CUSTOM_CSS_HOST_CLASS);
+    source.closest('#UI-Customization')?.classList.add(CUSTOM_CSS_LAYOUT_CLASS);
+    source.insertAdjacentElement('afterend', wrapper);
+
+    state.source = source;
+    state.wrapper = wrapper;
+    state.dirty = false;
+
+    const focusOutHandler = () => {
+        setTimeout(() => {
+            if (state.dirty && state.wrapper && !state.wrapper.contains(document.activeElement)) {
+                flushCustomCssCodeMirrorEditor('blur', { apply: true, save: true });
+            }
+        }, 0);
+    };
+
+    wrapper.addEventListener('focusout', focusOutHandler);
+    state.listeners.push({ target: wrapper, type: 'focusout', handler: focusOutHandler, options: undefined });
+
+    const loadingToken = {};
+    state.loadingToken = loadingToken;
+
+    void loadDescriptionCodeMirrorModules()
+        .then((modules) => {
+            if (!state.enabled || state.source !== source || state.wrapper !== wrapper || state.loadingToken !== loadingToken || !wrapper.isConnected) {
+                return;
+            }
+
+            createCustomCssCodeMirrorView(state, source, wrapper, modules);
+        })
+        .catch((error) => {
+            console.warn(`${LOG_PREFIX} CodeMirror custom CSS editor failed; falling back to stock textarea.`, error);
+
+            if (state.enabled && state.source === source && state.wrapper === wrapper && state.loadingToken === loadingToken) {
+                state.enabled = false;
+                detachCustomCssCodeMirrorEditor(state);
+                removeCustomCssCodeMirrorEditorStyle();
+            }
+        });
+}
+
+function updateCustomCssCodeMirrorColorScheme(state, source, wrapper) {
+    const colorScheme = detectCustomCssCodeMirrorColorScheme(source);
+
+    state.colorScheme = colorScheme;
+    wrapper.classList.toggle(CUSTOM_CSS_DARK_THEME_CLASS, colorScheme === 'dark');
+    wrapper.classList.toggle(CUSTOM_CSS_LIGHT_THEME_CLASS, colorScheme !== 'dark');
+    wrapper.dataset.colorScheme = colorScheme;
+
+    return colorScheme;
+}
+
+function detectCustomCssCodeMirrorColorScheme(source) {
+    const background = getElementBlendedBackgroundColor(source);
+    const luminance = getRelativeColorLuminance(background);
+
+    return luminance < CUSTOM_CSS_DARK_BACKGROUND_LUMINANCE_THRESHOLD ? 'dark' : 'light';
+}
+
+function getElementBlendedBackgroundColor(element) {
+    const elements = [];
+
+    for (let current = element; current instanceof Element; current = current.parentElement) {
+        elements.push(current);
+    }
+
+    let blended = { r: 255, g: 255, b: 255, a: 1 };
+
+    for (const current of elements.reverse()) {
+        const background = parseCssRgbColor(getComputedStyle(current).backgroundColor);
+
+        if (background?.a > 0) {
+            blended = blendColors(background, blended);
+        }
+    }
+
+    return blended;
+}
+
+function parseCssRgbColor(value) {
+    if (!value || value === 'transparent') {
+        return null;
+    }
+
+    const match = value.match(/^rgba?\((.+)\)$/i);
+
+    if (!match) {
+        return null;
+    }
+
+    const parts = match[1]
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean);
+
+    if (parts.length < 3) {
+        return null;
+    }
+
+    const readChannel = (part) => {
+        if (part.endsWith('%')) {
+            return Math.max(0, Math.min(255, (Number.parseFloat(part) / 100) * 255));
+        }
+
+        return Math.max(0, Math.min(255, Number.parseFloat(part)));
+    };
+    const alpha = parts.length >= 4 ? Number.parseFloat(parts[3]) : 1;
+
+    return {
+        r: readChannel(parts[0]),
+        g: readChannel(parts[1]),
+        b: readChannel(parts[2]),
+        a: Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1,
+    };
+}
+
+function blendColors(foreground, background) {
+    const alpha = foreground.a + background.a * (1 - foreground.a);
+
+    if (alpha <= 0) {
+        return { r: 255, g: 255, b: 255, a: 1 };
+    }
+
+    return {
+        r: (foreground.r * foreground.a + background.r * background.a * (1 - foreground.a)) / alpha,
+        g: (foreground.g * foreground.a + background.g * background.a * (1 - foreground.a)) / alpha,
+        b: (foreground.b * foreground.a + background.b * background.a * (1 - foreground.a)) / alpha,
+        a: alpha,
+    };
+}
+
+function getRelativeColorLuminance(color) {
+    const normalize = (channel) => {
+        const value = channel / 255;
+
+        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    };
+
+    return 0.2126 * normalize(color.r) + 0.7152 * normalize(color.g) + 0.0722 * normalize(color.b);
+}
+
+function createCustomCssCodeMirrorView(state, source, wrapper, modules) {
+    const {
+        EditorState,
+        EditorView,
+        keymap,
+        defaultKeymap = [],
+        history,
+        historyKeymap = [],
+        css,
+        defaultHighlightStyle,
+        HighlightStyle,
+        syntaxHighlighting,
+        classHighlighter,
+        tags,
+        oneDarkHighlightStyle,
+    } = modules;
+    const useHistory = source.value.length <= DESCRIPTION_CODEMIRROR_HISTORY_MAX_LENGTH;
+    const colorScheme = updateCustomCssCodeMirrorColorScheme(state, source, wrapper);
+    const highlightExtension = getCustomCssHighlightExtension({
+        colorScheme,
+        defaultHighlightStyle,
+        HighlightStyle,
+        syntaxHighlighting,
+        classHighlighter,
+        tags,
+        oneDarkHighlightStyle,
+    });
+
+    const extensions = [
+        EditorView.lineWrapping,
+        ...(typeof css === 'function' ? [css()] : []),
+        ...(highlightExtension ? [highlightExtension] : []),
+        EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+                state.dirty = true;
+            }
+        }),
+        EditorView.domEventHandlers({
+            beforeinput(event) {
+                event.stopPropagation();
+                return false;
+            },
+            input(event) {
+                event.stopPropagation();
+                return false;
+            },
+            compositionstart(event) {
+                event.stopPropagation();
+                return false;
+            },
+            compositionupdate(event) {
+                event.stopPropagation();
+                return false;
+            },
+            compositionend(event) {
+                event.stopPropagation();
+                return false;
+            },
+            keydown(event) {
+                event.stopPropagation();
+                return false;
+            },
+            keyup(event) {
+                event.stopPropagation();
+                return false;
+            },
+            click(event) {
+                event.stopPropagation();
+                return false;
+            },
+            mousedown(event) {
+                event.stopPropagation();
+                return false;
+            },
+            pointerdown(event) {
+                event.stopPropagation();
+                return false;
+            },
+            scroll() {
+                return false;
+            },
+        }),
+        EditorView.theme({
+            '&': {
+                backgroundColor: 'var(--SmartThemeBlurTintColor)',
+                border: '1px solid var(--SmartThemeBorderColor)',
+                borderRadius: '4px',
+                boxSizing: 'border-box',
+                color: 'var(--SmartThemeBodyColor)',
+                font: 'inherit',
+                maxWidth: '100%',
+                minHeight: '180px',
+                minWidth: '0',
+                overflow: 'hidden',
+                textShadow: 'none',
+                width: '100%',
+            },
+            '&.cm-focused': {
+                outline: 'none',
+            },
+            '.cm-scroller': {
+                fontFamily: 'var(--monoFontFamily, monospace)',
+                fontSize: '0.95em',
+                lineHeight: '1.35',
+                maxWidth: '100%',
+                maxHeight: '55vh',
+                minHeight: '180px',
+                minWidth: '0',
+                overflow: 'auto',
+                overflowAnchor: 'none',
+                overscrollBehavior: 'auto',
+                touchAction: 'pan-y',
+                WebkitOverflowScrolling: 'touch',
+            },
+            '.cm-content': {
+                caretColor: 'var(--SmartThemeBodyColor)',
+                minWidth: '0',
+                padding: '8px',
+                textShadow: 'none',
+            },
+            '.cm-line': {
+                padding: '0',
+            },
+        }, { dark: colorScheme === 'dark' }),
+    ];
+
+    if (useHistory && typeof history === 'function') {
+        extensions.push(history());
+    }
+
+    if (typeof keymap?.of === 'function') {
+        extensions.push(keymap.of(useHistory ? [...defaultKeymap, ...historyKeymap] : defaultKeymap));
+    }
+
+    if (EditorView.contentAttributes?.of) {
+        extensions.push(EditorView.contentAttributes.of({
+            autocomplete: 'off',
+            autocapitalize: 'off',
+            autocorrect: 'off',
+            spellcheck: 'false',
+            'aria-label': '自定义 CSS',
+        }));
+    }
+
+    wrapper.textContent = '';
+    state.view = new EditorView({
+        state: EditorState.create({
+            doc: source.value || '',
+            extensions,
+        }),
+        parent: wrapper,
+    });
+}
+
+function getCustomCssHighlightExtension({ colorScheme, defaultHighlightStyle, HighlightStyle, syntaxHighlighting, classHighlighter, tags, oneDarkHighlightStyle }) {
+    if (typeof syntaxHighlighting !== 'function') {
+        return null;
+    }
+
+    if (classHighlighter) {
+        return syntaxHighlighting(classHighlighter, { fallback: true });
+    }
+
+    if (colorScheme === 'dark' && oneDarkHighlightStyle) {
+        return syntaxHighlighting(oneDarkHighlightStyle, { fallback: true });
+    }
+
+    if (defaultHighlightStyle) {
+        return syntaxHighlighting(defaultHighlightStyle, { fallback: true });
+    }
+
+    if (typeof HighlightStyle !== 'function' || !tags) {
+        return null;
+    }
+
+    const rules = [];
+    const add = (tag, style) => {
+        if (Array.isArray(tag)) {
+            const existingTags = tag.filter(Boolean);
+            if (existingTags.length) {
+                rules.push({ tag: existingTags, ...style });
+            }
+        } else if (tag) {
+            rules.push({ tag, ...style });
+        }
+    };
+    const derivedTag = (derive, baseTag) => (typeof derive === 'function' && baseTag ? derive(baseTag) : null);
+
+    add(tags.meta, { color: '#404740' });
+    add(tags.link, { textDecoration: 'underline' });
+    add(tags.heading, { textDecoration: 'underline', fontWeight: 'bold' });
+    add(tags.emphasis, { fontStyle: 'italic' });
+    add(tags.strong, { fontWeight: 'bold' });
+    add(tags.strikethrough, { textDecoration: 'line-through' });
+    add(tags.keyword, { color: '#708' });
+    add([tags.atom, tags.bool, tags.url, tags.contentSeparator, tags.labelName], { color: '#219' });
+    add([tags.literal, tags.inserted], { color: '#164' });
+    add([tags.string, tags.deleted], { color: '#a11' });
+    add([tags.regexp, tags.escape, derivedTag(tags.special, tags.string)], { color: '#e40' });
+    add(derivedTag(tags.definition, tags.variableName), { color: '#00f' });
+    add(derivedTag(tags.local, tags.variableName), { color: '#30a' });
+    add([tags.typeName, tags.namespace], { color: '#085' });
+    add(tags.className, { color: '#167' });
+    add([derivedTag(tags.special, tags.variableName), tags.macroName], { color: '#256' });
+    add(derivedTag(tags.definition, tags.propertyName), { color: '#00c' });
+    add(tags.comment, { color: '#940' });
+    add(tags.invalid, { color: '#f00' });
+
+    return syntaxHighlighting(HighlightStyle.define(rules), { fallback: true });
+}
+
+function detachCustomCssCodeMirrorEditor(state) {
+    if (!state.source && !state.wrapper && !state.view) {
+        return;
+    }
+
+    for (const listener of state.listeners || []) {
+        listener.target.removeEventListener(listener.type, listener.handler, listener.options);
+    }
+
+    state.listeners = [];
+    state.view?.destroy?.();
+    state.source?.classList.remove(CUSTOM_CSS_SOURCE_HIDDEN_CLASS);
+    state.source?.parentElement?.classList.remove(CUSTOM_CSS_HOST_CLASS);
+    state.source?.closest('#UI-Customization')?.classList.remove(CUSTOM_CSS_LAYOUT_CLASS);
+    state.wrapper?.remove();
+    state.source = null;
+    state.wrapper = null;
+    state.view = null;
+    state.dirty = false;
+    state.loadingToken = null;
+}
+
+function getCustomCssCodeMirrorValue(state) {
+    return state.view?.state?.doc?.toString?.() ?? '';
+}
+
+function syncCustomCssCodeMirrorToSource(state) {
+    if (!(state.source instanceof HTMLTextAreaElement) || !state.view) {
+        return false;
+    }
+
+    const value = getCustomCssCodeMirrorValue(state);
+    const sourceChanged = state.source.value !== value;
+    const settingsChanged = power_user.custom_css !== value;
+
+    if (sourceChanged) {
+        state.source.value = value;
+    }
+
+    if (settingsChanged) {
+        power_user.custom_css = value;
+    }
+
+    return sourceChanged || settingsChanged;
+}
+
+function syncCustomCssCodeMirrorFromExternalSource(source) {
+    const state = extensionState[CUSTOM_CSS_CODEMIRROR_EDITOR_KEY];
+
+    if (!state?.enabled || state.source !== source || !state.view) {
+        return false;
+    }
+
+    return syncCustomCssCodeMirrorFromSource(state, { force: true });
+}
+
+function syncCustomCssCodeMirrorFromSourceIfClean(state) {
+    return syncCustomCssCodeMirrorFromSource(state, { force: false });
+}
+
+function syncCustomCssCodeMirrorFromSource(state, { force = false } = {}) {
+    if ((!force && state.dirty) || !(state.source instanceof HTMLTextAreaElement) || !state.view) {
+        return;
+    }
+
+    const value = state.source.value || '';
+    const current = getCustomCssCodeMirrorValue(state);
+
+    if (current !== value) {
+        state.view.dispatch({
+            changes: {
+                from: 0,
+                to: state.view.state.doc.length,
+                insert: value,
+            },
+        });
+        state.dirty = false;
+
+        return true;
+    }
+
+    state.dirty = false;
+
+    return false;
+}
+
+function flushCustomCssCodeMirrorEditor(reason, { apply = false, save = true } = {}) {
+    const state = extensionState[CUSTOM_CSS_CODEMIRROR_EDITOR_KEY];
+
+    if (!state?.enabled || state.flushing || !(state.source instanceof HTMLTextAreaElement) || !state.view) {
+        return false;
+    }
+
+    state.flushing = true;
+
+    try {
+        const changed = syncCustomCssCodeMirrorToSource(state) || state.dirty;
+        state.dirty = false;
+
+        if (changed && save) {
+            saveSettingsDebounced();
+            console.debug(`${LOG_PREFIX} CodeMirror custom CSS editor flushed after ${reason}`);
+        }
+
+        if (apply) {
+            flushCustomCssApply();
+        }
+
+        return changed;
+    } finally {
+        state.flushing = false;
+    }
+}
+
+function applyCustomCssCodeMirrorEditorStyle() {
+    let style = document.getElementById(CUSTOM_CSS_CODEMIRROR_EDITOR_STYLE_ID);
+
+    if (!style) {
+        style = document.createElement('style');
+        style.id = CUSTOM_CSS_CODEMIRROR_EDITOR_STYLE_ID;
+        document.head.append(style);
+    }
+
+    style.textContent = `
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID} {
+    box-sizing: border-box;
+    display: block;
+    flex: 1 1 auto;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    width: 100%;
+}
+
+#CustomCSS-textAreaBlock.${CUSTOM_CSS_HOST_CLASS},
+#UI-Customization.${CUSTOM_CSS_LAYOUT_CLASS} {
+    min-width: 0;
+}
+
+#CustomCSS-textAreaBlock.${CUSTOM_CSS_HOST_CLASS} {
+    align-items: stretch;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID} .cm-content span {
+    color: inherit !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    font-style: normal !important;
+    font-weight: inherit !important;
+    text-decoration: none !important;
+    text-shadow: none !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-meta {
+    color: #404740 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-link,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-link {
+    text-decoration: underline !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-heading {
+    font-weight: bold !important;
+    text-decoration: underline !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-emphasis,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-emphasis {
+    font-style: italic !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-strong,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-strong {
+    font-weight: bold !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-strikethrough,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-strikethrough {
+    text-decoration: line-through !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-keyword {
+    color: #708 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-atom,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-bool,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-url,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-labelName {
+    color: #219 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-literal,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-number,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-inserted {
+    color: #164 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-string,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-deleted {
+    color: #a11 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-string2 {
+    color: #e40 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-variableName.tok-definition {
+    color: #00f !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-variableName.tok-local {
+    color: #30a !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-className {
+    color: #167 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-typeName,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-namespace {
+    color: #085 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-variableName2,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-macroName {
+    color: #256 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-propertyName.tok-definition {
+    color: #00c !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-comment {
+    color: #940 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-propertyName {
+    color: inherit !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_LIGHT_THEME_CLASS} .cm-content .tok-invalid {
+    color: #f00 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-keyword {
+    color: #c678dd !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-variableName,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-propertyName,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-macroName,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-deleted {
+    color: #e06c75 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-labelName {
+    color: #61afef !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-literal {
+    color: #d19a66 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-variableName.tok-definition,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-propertyName.tok-definition {
+    color: #abb2bf !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-typeName,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-className,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-number,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-namespace {
+    color: #e5c07b !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-operator,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-url,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-string2 {
+    color: #56b6c2 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-meta,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-comment {
+    color: #7d8799 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-atom,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-bool,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-variableName2 {
+    color: #d19a66 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-string,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-inserted {
+    color: #98c379 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-link {
+    color: #7d8799 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-heading {
+    color: #e06c75 !important;
+    font-weight: bold !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID}.${CUSTOM_CSS_DARK_THEME_CLASS} .cm-content .tok-invalid {
+    color: #ffffff !important;
+}
+
+.${CUSTOM_CSS_SOURCE_HIDDEN_CLASS} {
+    display: none !important;
+}
+`;
+}
+
+function removeCustomCssCodeMirrorEditorStyle() {
+    document.getElementById(CUSTOM_CSS_CODEMIRROR_EDITOR_STYLE_ID)?.remove();
 }
 
 function isWelcomeRecentChatDirectOpenCompatibilityMode() {
@@ -2811,67 +3877,561 @@ function updatePromptManagerTokenDisplay() {
     }
 }
 
-function applyTextareaScrollOptimization() {
-    if (settings.textareaScrollOptimizationEnabled) {
-        patchAutoCompleteFloatingPositioning();
-        applyTextareaScrollOptimizationStyle();
+function dispatchDescriptionEditorSourceInput(source) {
+    let event = null;
+
+    try {
+        event = typeof InputEvent === 'function'
+            ? new InputEvent('input', {
+                bubbles: true,
+                inputType: 'insertReplacementText',
+                data: '',
+            })
+            : null;
+    } catch {
+        event = null;
+    }
+
+    event ||= new Event('input', { bubbles: true });
+
+    source.dispatchEvent(event);
+}
+
+function applyDescriptionCodeMirrorEditorOptimization() {
+    if (settings.descriptionCodeMirrorEditorEnabled) {
+        installDescriptionCodeMirrorEditorOptimization();
     } else {
-        restoreAutoCompleteFloatingPositioning();
-        removeTextareaScrollOptimizationStyle();
+        removeDescriptionCodeMirrorEditorOptimization();
     }
 }
 
-function patchAutoCompleteFloatingPositioning() {
-    const originalUpdateFloatingPosition = AutoComplete.prototype.updateFloatingPosition;
+function installDescriptionCodeMirrorEditorOptimization() {
+    const state = getDescriptionCodeMirrorEditorState();
+    state.enabled = true;
 
-    if (typeof originalUpdateFloatingPosition !== 'function' || originalUpdateFloatingPosition.__mobileTextareaScrollPatched) {
+    applyDescriptionCodeMirrorEditorStyle();
+    installDescriptionCodeMirrorEditorGlobalListeners(state);
+    refreshDescriptionCodeMirrorEditorTarget(state);
+    installDescriptionCodeMirrorEditorMutationObserver(state);
+}
+
+function removeDescriptionCodeMirrorEditorOptimization() {
+    const state = extensionState[DESCRIPTION_CODEMIRROR_EDITOR_KEY];
+
+    if (!state) {
         return;
     }
 
-    function guardedUpdateFloatingPosition(...args) {
-        if (!this.isActive) {
+    flushDescriptionCodeMirrorEditor('disable', { dispatchInput: false, save: false });
+    state.enabled = false;
+    clearDescriptionCodeMirrorEditorTimer(state);
+
+    if (state.refreshFrame) {
+        cancelAnimationFrame(state.refreshFrame);
+        state.refreshFrame = 0;
+    }
+
+    state.mutationObserver?.disconnect();
+    state.mutationObserver = null;
+    detachDescriptionCodeMirrorEditor(state);
+
+    for (const listener of state.globalListeners || []) {
+        listener.target.removeEventListener(listener.type, listener.handler, listener.options);
+    }
+
+    state.globalListeners = [];
+    removeDescriptionCodeMirrorEditorStyle();
+    delete extensionState[DESCRIPTION_CODEMIRROR_EDITOR_KEY];
+}
+
+function getDescriptionCodeMirrorEditorState() {
+    if (!extensionState[DESCRIPTION_CODEMIRROR_EDITOR_KEY]) {
+        extensionState[DESCRIPTION_CODEMIRROR_EDITOR_KEY] = {
+            enabled: false,
+            source: null,
+            wrapper: null,
+            view: null,
+            listeners: [],
+            globalListeners: [],
+            mutationObserver: null,
+            refreshFrame: 0,
+            timer: 0,
+            dirty: false,
+            flushing: false,
+            loadingToken: null,
+        };
+    }
+
+    return extensionState[DESCRIPTION_CODEMIRROR_EDITOR_KEY];
+}
+
+function installDescriptionCodeMirrorEditorGlobalListeners(state) {
+    if (state.globalListeners.length > 0) {
+        return;
+    }
+
+    const clickHandler = (event) => {
+        if (event.target instanceof Element && event.target.closest('#create_button')) {
+            flushDescriptionCodeMirrorEditor('manual save click', { dispatchInput: false, save: false });
+        }
+    };
+    const submitHandler = (event) => {
+        if (event.target instanceof HTMLFormElement && event.target.matches('#form_create')) {
+            flushDescriptionCodeMirrorEditor('form submit', { dispatchInput: false, save: false });
+        }
+    };
+    const pageLifecycleHandler = () => {
+        flushDescriptionCodeMirrorEditor('page lifecycle', { dispatchInput: false, save: false });
+    };
+
+    document.addEventListener('click', clickHandler, true);
+    document.addEventListener('submit', submitHandler, true);
+    window.addEventListener('pagehide', pageLifecycleHandler);
+    document.addEventListener('visibilitychange', pageLifecycleHandler);
+
+    state.globalListeners.push(
+        { target: document, type: 'click', handler: clickHandler, options: true },
+        { target: document, type: 'submit', handler: submitHandler, options: true },
+        { target: window, type: 'pagehide', handler: pageLifecycleHandler, options: undefined },
+        { target: document, type: 'visibilitychange', handler: pageLifecycleHandler, options: undefined },
+    );
+}
+
+function installDescriptionCodeMirrorEditorMutationObserver(state) {
+    if (state.mutationObserver || typeof MutationObserver !== 'function') {
+        return;
+    }
+
+    const root = document.body || document.documentElement;
+
+    if (!root) {
+        return;
+    }
+
+    state.mutationObserver = new MutationObserver((mutations) => {
+        if (areDescriptionCodeMirrorMutationsInternal(state, mutations)) {
             return;
         }
 
-        return originalUpdateFloatingPosition.apply(this, args);
-    }
-
-    guardedUpdateFloatingPosition.__mobileTextareaScrollPatched = true;
-    guardedUpdateFloatingPosition.__mobileTextareaScrollOriginal = originalUpdateFloatingPosition;
-    extensionState.originalAutoCompleteUpdateFloatingPosition = originalUpdateFloatingPosition;
-    AutoComplete.prototype.updateFloatingPosition = guardedUpdateFloatingPosition;
+        scheduleDescriptionCodeMirrorEditorRefresh(state);
+    });
+    state.mutationObserver.observe(root, { childList: true, subtree: true });
 }
 
-function restoreAutoCompleteFloatingPositioning() {
-    const currentUpdateFloatingPosition = AutoComplete.prototype.updateFloatingPosition;
+function areDescriptionCodeMirrorMutationsInternal(state, mutations) {
+    const wrapper = state.wrapper;
 
-    if (currentUpdateFloatingPosition?.__mobileTextareaScrollPatched) {
-        AutoComplete.prototype.updateFloatingPosition = currentUpdateFloatingPosition.__mobileTextareaScrollOriginal;
+    if (!(wrapper instanceof HTMLElement)) {
+        return false;
+    }
+
+    return mutations.every((mutation) => {
+        if (mutation.target instanceof Node && wrapper.contains(mutation.target)) {
+            return true;
+        }
+
+        for (const node of mutation.addedNodes) {
+            if (!(node instanceof Node) || !wrapper.contains(node)) {
+                return false;
+            }
+        }
+
+        for (const node of mutation.removedNodes) {
+            if (!(node instanceof Node) || !wrapper.contains(node)) {
+                return false;
+            }
+        }
+
+        return mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0;
+    });
+}
+
+function scheduleDescriptionCodeMirrorEditorRefresh(state = extensionState[DESCRIPTION_CODEMIRROR_EDITOR_KEY]) {
+    if (!state?.enabled || state.refreshFrame) {
+        return;
+    }
+
+    state.refreshFrame = requestAnimationFrame(() => {
+        state.refreshFrame = 0;
+        refreshDescriptionCodeMirrorEditorTarget(state);
+    });
+}
+
+function refreshDescriptionCodeMirrorEditorTarget(state) {
+    if (!state?.enabled) {
+        return;
+    }
+
+    const source = document.querySelector(DESCRIPTION_EDITOR_SOURCE_SELECTOR);
+
+    if (!(source instanceof HTMLTextAreaElement) || !source.isConnected) {
+        detachDescriptionCodeMirrorEditor(state);
+        return;
+    }
+
+    if (state.source === source && state.wrapper?.isConnected) {
+        syncDescriptionCodeMirrorFromSourceIfClean(state);
+        return;
+    }
+
+    detachDescriptionCodeMirrorEditor(state);
+    attachDescriptionCodeMirrorEditor(state, source);
+}
+
+function attachDescriptionCodeMirrorEditor(state, source) {
+    const wrapper = document.createElement('div');
+
+    wrapper.id = DESCRIPTION_CODEMIRROR_EDITOR_ID;
+    wrapper.className = DESCRIPTION_CODEMIRROR_EDITOR_CLASS;
+    wrapper.textContent = 'Loading CodeMirror...';
+    source.classList.add(DESCRIPTION_EDITOR_SOURCE_HIDDEN_CLASS);
+    source.insertAdjacentElement('afterend', wrapper);
+
+    state.source = source;
+    state.wrapper = wrapper;
+    state.dirty = false;
+
+    const focusOutHandler = () => {
+        setTimeout(() => {
+            if (state.dirty && state.wrapper && !state.wrapper.contains(document.activeElement)) {
+                scheduleDescriptionCodeMirrorEditorFlush(state, 'blur', DESCRIPTION_CODEMIRROR_BLUR_SAVE_DELAY_MS);
+            }
+        }, 0);
+    };
+
+    wrapper.addEventListener('focusout', focusOutHandler);
+    state.listeners.push({ target: wrapper, type: 'focusout', handler: focusOutHandler, options: undefined });
+
+    const loadingToken = {};
+    state.loadingToken = loadingToken;
+
+    void loadDescriptionCodeMirrorModules()
+        .then((modules) => {
+            if (!state.enabled || state.source !== source || state.wrapper !== wrapper || state.loadingToken !== loadingToken || !wrapper.isConnected) {
+                return;
+            }
+
+            createDescriptionCodeMirrorView(state, source, wrapper, modules);
+        })
+        .catch((error) => {
+            console.warn(`${LOG_PREFIX} CodeMirror description editor failed; falling back to stock textarea.`, error);
+
+            if (state.enabled && state.source === source && state.wrapper === wrapper && state.loadingToken === loadingToken) {
+                settings.descriptionCodeMirrorEditorEnabled = false;
+                saveExtensionSettings();
+                $('#bai_bai_toolkit_description_codemirror_editor_enabled').prop('checked', false);
+                removeDescriptionCodeMirrorEditorOptimization();
+            }
+        });
+}
+
+async function loadDescriptionCodeMirrorModules() {
+    if (extensionState[DESCRIPTION_CODEMIRROR_MODULES_KEY]) {
+        return extensionState[DESCRIPTION_CODEMIRROR_MODULES_KEY];
+    }
+
+    const localUrl = new URL(DESCRIPTION_CODEMIRROR_LOCAL_BUNDLE_PATH, import.meta.url).href;
+
+    try {
+        const localBundle = await import(localUrl);
+
+        if (localBundle.EditorState && localBundle.EditorView) {
+            extensionState[DESCRIPTION_CODEMIRROR_MODULES_KEY] = localBundle;
+            return localBundle;
+        }
+    } catch {
+        // No local bundle is expected during early testing.
+    }
+
+    const [stateModule, viewModule, commandsModule, cssModule, languageModule, highlightModule, oneDarkModule] = await Promise.all([
+        import(DESCRIPTION_CODEMIRROR_CDN_MODULES.state),
+        import(DESCRIPTION_CODEMIRROR_CDN_MODULES.view),
+        import(DESCRIPTION_CODEMIRROR_CDN_MODULES.commands),
+        import(DESCRIPTION_CODEMIRROR_CDN_MODULES.css).catch(() => ({})),
+        import(DESCRIPTION_CODEMIRROR_CDN_MODULES.language).catch(() => ({})),
+        import(DESCRIPTION_CODEMIRROR_CDN_MODULES.highlight).catch(() => ({})),
+        import(DESCRIPTION_CODEMIRROR_CDN_MODULES.oneDark).catch(() => ({})),
+    ]);
+
+    const modules = {
+        EditorState: stateModule.EditorState,
+        EditorView: viewModule.EditorView,
+        keymap: viewModule.keymap,
+        defaultKeymap: commandsModule.defaultKeymap,
+        history: commandsModule.history,
+        historyKeymap: commandsModule.historyKeymap,
+        css: cssModule.css,
+        defaultHighlightStyle: languageModule.defaultHighlightStyle,
+        HighlightStyle: languageModule.HighlightStyle,
+        syntaxHighlighting: languageModule.syntaxHighlighting,
+        classHighlighter: highlightModule.classHighlighter,
+        tags: highlightModule.tags,
+        oneDarkHighlightStyle: oneDarkModule.oneDarkHighlightStyle,
+        oneDarkTheme: oneDarkModule.oneDarkTheme,
+        oneDarkColor: oneDarkModule.color,
+    };
+
+    if (!modules.EditorState || !modules.EditorView) {
+        throw new Error('CodeMirror modules did not expose EditorState/EditorView');
+    }
+
+    extensionState[DESCRIPTION_CODEMIRROR_MODULES_KEY] = modules;
+    return modules;
+}
+
+function createDescriptionCodeMirrorView(state, source, wrapper, modules) {
+    const {
+        EditorState,
+        EditorView,
+        keymap,
+        defaultKeymap = [],
+        history,
+        historyKeymap = [],
+    } = modules;
+    const useHistory = source.value.length <= DESCRIPTION_CODEMIRROR_HISTORY_MAX_LENGTH;
+
+    const extensions = [
+        EditorView.lineWrapping,
+        EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+                state.dirty = true;
+            }
+        }),
+        EditorView.domEventHandlers({
+            beforeinput(event) {
+                event.stopPropagation();
+                return false;
+            },
+            input(event) {
+                event.stopPropagation();
+                return false;
+            },
+            keydown(event) {
+                event.stopPropagation();
+                return false;
+            },
+            keyup(event) {
+                event.stopPropagation();
+                return false;
+            },
+            click(event) {
+                event.stopPropagation();
+                return false;
+            },
+            mousedown(event) {
+                event.stopPropagation();
+                return false;
+            },
+            pointerdown(event) {
+                event.stopPropagation();
+                return false;
+            },
+            scroll() {
+                return false;
+            },
+        }),
+        EditorView.theme({
+            '&': {
+                backgroundColor: 'var(--SmartThemeBlurTintColor)',
+                border: '1px solid var(--SmartThemeBorderColor)',
+                borderRadius: '4px',
+                contain: 'layout paint style',
+                color: 'var(--SmartThemeBodyColor)',
+                font: 'inherit',
+                minHeight: 'min(42vh, 420px)',
+                textShadow: 'none',
+            },
+            '&.cm-focused': {
+                outline: 'none',
+            },
+            '.cm-scroller': {
+                fontFamily: 'inherit',
+                lineHeight: '1.35',
+                maxHeight: '55vh',
+                minHeight: 'min(42vh, 420px)',
+                overflow: 'auto',
+                overflowAnchor: 'none',
+                overscrollBehavior: 'contain',
+                touchAction: 'pan-y',
+                WebkitOverflowScrolling: 'touch',
+            },
+            '.cm-content': {
+                caretColor: 'var(--SmartThemeBodyColor)',
+                contain: 'layout paint style',
+                padding: '8px',
+                textShadow: 'none',
+            },
+            '.cm-line': {
+                padding: '0',
+            },
+        }),
+    ];
+
+    if (useHistory && typeof history === 'function') {
+        extensions.push(history());
+    }
+
+    if (typeof keymap?.of === 'function') {
+        extensions.push(keymap.of(useHistory ? [...defaultKeymap, ...historyKeymap] : defaultKeymap));
+    }
+
+    if (EditorView.contentAttributes?.of) {
+        extensions.push(EditorView.contentAttributes.of({
+            autocomplete: 'off',
+            autocapitalize: 'off',
+            autocorrect: 'off',
+            spellcheck: 'false',
+            'aria-label': source.getAttribute('aria-label') || '角色描述',
+        }));
+    }
+
+    wrapper.textContent = '';
+    state.view = new EditorView({
+        state: EditorState.create({
+            doc: source.value || '',
+            extensions,
+        }),
+        parent: wrapper,
+    });
+}
+
+function detachDescriptionCodeMirrorEditor(state) {
+    if (!state.source && !state.wrapper && !state.view) {
+        return;
+    }
+
+    clearDescriptionCodeMirrorEditorTimer(state);
+
+    for (const listener of state.listeners || []) {
+        listener.target.removeEventListener(listener.type, listener.handler, listener.options);
+    }
+
+    state.listeners = [];
+    state.view?.destroy?.();
+    state.source?.classList.remove(DESCRIPTION_EDITOR_SOURCE_HIDDEN_CLASS);
+    state.wrapper?.remove();
+    state.source = null;
+    state.wrapper = null;
+    state.view = null;
+    state.dirty = false;
+    state.loadingToken = null;
+}
+
+function getDescriptionCodeMirrorValue(state) {
+    return state.view?.state?.doc?.toString?.() ?? '';
+}
+
+function syncDescriptionCodeMirrorToSourceSilently(state) {
+    if (!(state.source instanceof HTMLTextAreaElement) || !state.view) {
+        return false;
+    }
+
+    const value = getDescriptionCodeMirrorValue(state);
+    const changed = state.source.value !== value;
+
+    if (changed) {
+        state.source.value = value;
+    }
+
+    return changed;
+}
+
+function syncDescriptionCodeMirrorFromSourceIfClean(state) {
+    if (state.dirty || !(state.source instanceof HTMLTextAreaElement) || !state.view) {
+        return;
+    }
+
+    const value = state.source.value || '';
+    const current = getDescriptionCodeMirrorValue(state);
+
+    if (current !== value) {
+        state.view.dispatch({
+            changes: {
+                from: 0,
+                to: state.view.state.doc.length,
+                insert: value,
+            },
+        });
+        state.dirty = false;
     }
 }
 
-function applyTextareaScrollOptimizationStyle() {
-    let style = document.getElementById(TEXTAREA_SCROLL_OPTIMIZATION_STYLE_ID);
+function scheduleDescriptionCodeMirrorEditorFlush(state, reason, delayMs) {
+    if (!state?.enabled || state.flushing) {
+        return;
+    }
+
+    clearDescriptionCodeMirrorEditorTimer(state);
+    state.timer = setTimeout(() => {
+        state.timer = 0;
+        flushDescriptionCodeMirrorEditor(`deferred ${reason}`, { dispatchInput: true, save: true });
+    }, delayMs);
+}
+
+function clearDescriptionCodeMirrorEditorTimer(state) {
+    if (state?.timer) {
+        clearTimeout(state.timer);
+        state.timer = 0;
+    }
+}
+
+function flushDescriptionCodeMirrorEditor(reason, { dispatchInput = true, save = true } = {}) {
+    const state = extensionState[DESCRIPTION_CODEMIRROR_EDITOR_KEY];
+
+    if (!state?.enabled || state.flushing || !(state.source instanceof HTMLTextAreaElement) || !state.view) {
+        return false;
+    }
+
+    clearDescriptionCodeMirrorEditorTimer(state);
+    state.flushing = true;
+
+    try {
+        const changed = syncDescriptionCodeMirrorToSourceSilently(state) || state.dirty;
+        state.dirty = false;
+
+        if (changed && dispatchInput) {
+            dispatchDescriptionEditorSourceInput(state.source);
+        }
+
+        if (changed && save && isExistingCharacterEditForm()) {
+            document.querySelector('#create_button')?.click();
+            console.debug(`${LOG_PREFIX} CodeMirror description editor flushed after ${reason}`);
+        }
+
+        return changed;
+    } finally {
+        state.flushing = false;
+    }
+}
+
+function applyDescriptionCodeMirrorEditorStyle() {
+    let style = document.getElementById(DESCRIPTION_CODEMIRROR_EDITOR_STYLE_ID);
 
     if (!style) {
         style = document.createElement('style');
-        style.id = TEXTAREA_SCROLL_OPTIMIZATION_STYLE_ID;
+        style.id = DESCRIPTION_CODEMIRROR_EDITOR_STYLE_ID;
         document.head.append(style);
     }
 
     style.textContent = `
-@media screen and (max-width: 1000px) {
-    #description_textarea,
-    textarea.maximized_textarea[data-for="description_textarea"] {
-        text-shadow: none !important;
-        -webkit-overflow-scrolling: touch;
-    }
+#${DESCRIPTION_CODEMIRROR_EDITOR_ID} {
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+}
+
+.${DESCRIPTION_EDITOR_SOURCE_HIDDEN_CLASS} {
+    display: none !important;
 }
 `;
 }
 
-function removeTextareaScrollOptimizationStyle() {
-    document.getElementById(TEXTAREA_SCROLL_OPTIMIZATION_STYLE_ID)?.remove();
+function removeDescriptionCodeMirrorEditorStyle() {
+    document.getElementById(DESCRIPTION_CODEMIRROR_EDITOR_STYLE_ID)?.remove();
+}
+
+function isExistingCharacterEditForm() {
+    return document.querySelector('#form_create')?.getAttribute('actiontype') === 'editcharacter';
 }
 
 function patchAutoCompletePositioning() {

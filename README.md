@@ -15,6 +15,8 @@ What it does:
 - Allows the message editor to open immediately after deleting messages with SillyTavern's delete-message mode, and submits that fast-opened edit before replaying common generation actions
 - Prevents mobile auto-focus from opening the keyboard when entering message edit mode, opening the chat file manager, entering a character chat, or when SillyTavern automatically refocuses the chat input while preserving manual input focus
 - Suppresses chat scroll compensation caused by mobile keyboard layout resize while editing messages
+- Adds a separate `自定义CSS CodeMirror 编辑器` switch that replaces the visible `#customCSS` textarea with CodeMirror and applies the stylesheet after editing, avoiding native textarea and stylesheet work during IME composition
+- Adds an experimental CodeMirror 6 role-description editor mode that replaces the visible long textarea with a lightweight editor and restores SillyTavern's original textarea if CodeMirror cannot be loaded
 - Adds a SillyTavern extension settings panel with separate switches for the responsiveness, chat file manager, and prompt preset features
 
 The chat file manager optimization only applies when:
