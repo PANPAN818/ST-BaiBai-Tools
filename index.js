@@ -264,6 +264,7 @@ const defaultSettings = {
     presetPromptCodeMirrorEditorEnabled: true,
     presetAutoSaveAfterPromptEditEnabled: false,
     chatDeleteEditFlowOptimizationEnabled: true,
+    messageTripleClickEditEnabled: true,
 };
 const legacySettingsKeys = [
     'textareaScrollOptimizationEnabled',
@@ -2019,6 +2020,14 @@ async function renderSettingsPanel() {
             saveExtensionSettings();
         });
 
+    $('#bai_bai_toolkit_message_triple_click_edit_enabled')
+        .prop('checked', settings.messageTripleClickEditEnabled)
+        .on('input', function () {
+            settings.messageTripleClickEditEnabled = Boolean($(this).prop('checked'));
+            saveExtensionSettings();
+            applyMessageTripleClickEdit();
+        });
+
     applyCompatibilityIndicators(container);
 }
 
@@ -2175,6 +2184,7 @@ function applyFeatureSettings() {
     applyLongChatDomRenderOptimization();
     applyMobileAutoKeyboardSuppression();
     applyMobileMessageEditScrollGuard();
+    applyMessageTripleClickEdit();
 }
 
 function applyLongChatDomRenderOptimization() {
@@ -9484,5 +9494,37 @@ function tryParseJson(value) {
         return JSON.parse(value);
     } catch {
         return null;
+    }
+}
+
+function applyMessageTripleClickEdit() {
+    const chatElement = document.getElementById('chat');
+    if (!chatElement) return;
+
+    chatElement.removeEventListener('click', handleMessageTripleClickEdit);
+
+    if (settings.messageTripleClickEditEnabled) {
+        chatElement.addEventListener('click', handleMessageTripleClickEdit);
+    }
+}
+
+function handleMessageTripleClickEdit(e) {
+    if (e.detail === 3) {
+        const mesText = e.target.closest('.mes_text');
+        if (mesText) {
+            const mes = mesText.closest('.mes');
+            if (mes) {
+                const editBtn = mes.querySelector('.mes_button.mes_edit');
+                if (editBtn) {
+                    editBtn.click();
+
+                    // Clear text selection created by triple clicking
+                    const selection = window.getSelection();
+                    if (selection) {
+                        selection.removeAllRanges();
+                    }
+                }
+            }
+        }
     }
 }
