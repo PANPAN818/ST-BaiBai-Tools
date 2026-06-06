@@ -244,6 +244,7 @@ const defaultSettings = {
     resizeGuardEnabled: true,
     descriptionCodeMirrorEditorEnabled: true,
     customCssInputOptimizationEnabled: true,
+    customCssShadowPropertyEnabled: true,
     worldInfoDrawerOptimizationEnabled: true,
     fastChatListEnabled: true,
     welcomeRecentChatDirectOpenEnabled: true,
@@ -1798,6 +1799,28 @@ async function renderSettingsPanel() {
         .prop('checked', settings.customCssInputOptimizationEnabled)
         .on('input', function () {
             settings.customCssInputOptimizationEnabled = Boolean($(this).prop('checked'));
+
+            // Auto-disable shadow property optimization if CodeMirror editor is disabled
+            if (!settings.customCssInputOptimizationEnabled && settings.customCssShadowPropertyEnabled) {
+                settings.customCssShadowPropertyEnabled = false;
+                $('#bai_bai_toolkit_custom_css_shadow_property_enabled').prop('checked', false);
+            }
+
+            saveExtensionSettings();
+            applyCustomCssInputOptimization();
+        });
+
+    $('#bai_bai_toolkit_custom_css_shadow_property_enabled')
+        .prop('checked', settings.customCssShadowPropertyEnabled)
+        .on('input', function () {
+            settings.customCssShadowPropertyEnabled = Boolean($(this).prop('checked'));
+
+            // Auto-enable CodeMirror editor if shadow property optimization is enabled
+            if (settings.customCssShadowPropertyEnabled && !settings.customCssInputOptimizationEnabled) {
+                settings.customCssInputOptimizationEnabled = true;
+                $('#bai_bai_toolkit_custom_css_input_optimization_enabled').prop('checked', true);
+            }
+
             saveExtensionSettings();
             applyCustomCssInputOptimization();
         });
@@ -2858,6 +2881,12 @@ function getLongChatMessageTextLength(message) {
 }
 
 function applyCustomCssInputOptimization() {
+    if (settings.customCssShadowPropertyEnabled) {
+        installCustomCssShadowPropertyOptimization();
+    } else {
+        removeCustomCssShadowPropertyOptimization();
+    }
+
     if (settings.customCssInputOptimizationEnabled) {
         installCustomCssInputOptimization();
         installCustomCssCodeMirrorEditorOptimization();
@@ -2865,6 +2894,62 @@ function applyCustomCssInputOptimization() {
         removeCustomCssCodeMirrorEditorOptimization();
         removeCustomCssInputOptimization();
     }
+}
+
+function installCustomCssShadowPropertyOptimization() {
+    if (extensionState.customCssShadowPropertyInstalled) {
+        return;
+    }
+
+    const input = document.getElementById(CUSTOM_CSS_INPUT_ID);
+    if (!(input instanceof HTMLTextAreaElement)) {
+        return;
+    }
+
+    const originalDescriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+    if (!originalDescriptor || typeof originalDescriptor.get !== 'function' || typeof originalDescriptor.set !== 'function') {
+        return;
+    }
+
+    let virtualValue = input.value || '';
+
+    // Store original so we can restore later
+    extensionState.customCssOriginalValueDescriptor = originalDescriptor;
+
+    Object.defineProperty(input, 'value', {
+        get: function() {
+            return virtualValue;
+        },
+        set: function(newValue) {
+            virtualValue = String(newValue);
+            // Intentionally DO NOT call original setter to prevent DOM rendering
+        },
+        configurable: true,
+        enumerable: true
+    });
+
+    extensionState.customCssShadowPropertyInstalled = true;
+    console.debug(`${LOG_PREFIX} Custom CSS shadow property optimization installed`);
+}
+
+function removeCustomCssShadowPropertyOptimization() {
+    if (!extensionState.customCssShadowPropertyInstalled) {
+        return;
+    }
+
+    const input = document.getElementById(CUSTOM_CSS_INPUT_ID);
+    const originalDescriptor = extensionState.customCssOriginalValueDescriptor;
+
+    if (input instanceof HTMLTextAreaElement && originalDescriptor) {
+        // Restore actual value to DOM before removing interception
+        const currentValue = input.value;
+        Object.defineProperty(input, 'value', originalDescriptor);
+        input.value = currentValue;
+    }
+
+    extensionState.customCssOriginalValueDescriptor = null;
+    extensionState.customCssShadowPropertyInstalled = false;
+    console.debug(`${LOG_PREFIX} Custom CSS shadow property optimization removed`);
 }
 
 function installCustomCssInputOptimization() {
@@ -7564,7 +7649,7 @@ function createPresetPromptCodeMirrorView(state, source, wrapper, modules) {
                 color: 'var(--SmartThemeBodyColor)',
                 font: 'inherit',
                 maxWidth: '100%',
-                minHeight: 'min(46vh, 520px)',
+                minHeight: 'min(34vh, 360px)',
                 minWidth: '0',
                 overflow: 'hidden',
                 textShadow: 'none',
@@ -7576,8 +7661,8 @@ function createPresetPromptCodeMirrorView(state, source, wrapper, modules) {
             '.cm-scroller': {
                 fontFamily: 'inherit',
                 lineHeight: '1.35',
-                maxHeight: '60vh',
-                minHeight: 'min(46vh, 520px)',
+                maxHeight: 'min(44vh, 440px)',
+                minHeight: 'min(34vh, 360px)',
                 minWidth: '0',
                 overflow: 'auto',
                 overflowAnchor: 'none',

@@ -2,7 +2,7 @@
 
 This extension packages a small set of SillyTavern responsiveness fixes as a third-party extension.
 
-Current version: `0.20.0`
+Current version: `0.21.0`
 
 What it does:
 
@@ -21,6 +21,7 @@ What it does:
 - Allows the message editor to open immediately after deleting messages with SillyTavern's delete-message mode, and submits that fast-opened edit before replaying common generation actions
 - Prevents mobile auto-focus from opening the keyboard when entering message edit mode, opening the chat file manager, entering a character chat, or when SillyTavern automatically refocuses the chat input while preserving manual input focus
 - Suppresses chat scroll compensation caused by mobile keyboard layout resize while editing messages
+- Adds a separate `切换美化优化` (Custom CSS Shadow Property) switch that completely intercepts native `#customCSS` writes and redirects them to a virtual JavaScript memory property, physically preventing browser reflow and repaint freezes caused by large CSS string assignments during theme switches
 - Adds a separate `自定义CSS CodeMirror 编辑器` switch that replaces the visible `#customCSS` textarea and SillyTavern's expanded custom-CSS editor with CodeMirror, applies the stylesheet after editing, avoids native textarea and stylesheet work during IME composition, and gives CSS punctuation theme-aware highlighting
 - Adds an experimental CodeMirror 6 role-description editor mode that replaces the visible long textarea with a lightweight editor and restores SillyTavern's original textarea if CodeMirror cannot be loaded
 - Adds a SillyTavern extension settings panel with separate switches for the responsiveness, chat file manager, and prompt preset features
