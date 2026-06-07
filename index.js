@@ -41,11 +41,15 @@ const REGEX_QUICK_OPERATION_HANDLER_KEY = '__baiBaiToolkitRegexQuickOperationHan
 const REGEX_QUICK_OPERATION_OBSERVER_KEY = '__baiBaiToolkitRegexQuickOperationObserver';
 const REGEX_QUICK_OPERATION_IMPORT_HANDLER_KEY = '__baiBaiToolkitRegexQuickOperationImportHandler';
 const REGEX_VUE_MANAGER_CLICK_HANDLER_KEY = '__baiBaiToolkitRegexVueManagerClickHandler';
+const REGEX_VUE_SCOPED_CONTEXT_HANDLER_KEY = '__baiBaiToolkitRegexVueScopedContextHandler';
+const REGEX_VUE_NATIVE_RENDER_GUARD_KEY = '__baiBaiToolkitRegexVueNativeRenderGuard';
 const REGEX_VUE_MANAGER_ROOT_ID = 'bai_bai_toolkit_regex_vue_manager_root';
 const REGEX_VUE_MANAGER_STYLE_ID = 'bai_bai_toolkit_regex_vue_manager_style';
 const REGEX_VUE_MANAGER_MODULE_PATH = './vendor/vue.esm-browser.prod.js';
 const REGEX_VUE_DRAGGABLE_MODULE_PATH = './vendor/vue-draggable-next.esm-browser.prod.js';
 const REGEX_UNGROUPED_GROUP_ID = '__ungrouped';
+const REGEX_VUE_GROUP_BODY_TRANSITION_KEY = '__baiBaiToolkitRegexVueGroupBodyTransition';
+const REGEX_VUE_GROUP_COLLAPSE_ANIMATION_MS = 180;
 const DESCRIPTION_EDITOR_SOURCE_SELECTOR = '#description_textarea';
 const DESCRIPTION_EDITOR_SOURCE_HIDDEN_CLASS = 'bai-bai-toolkit-description-source-hidden';
 const DESCRIPTION_CODEMIRROR_EDITOR_ID = 'bai_bai_description_codemirror_editor';
@@ -88,8 +92,11 @@ const WORLD_INFO_LAZY_SELECT2_PATCH_KEY = '__baiBaiToolkitWorldInfoLazySelect2Pa
 const WORLD_INFO_CHARACTER_FILTER_APPEND_PATCH_KEY = '__baiBaiToolkitWorldInfoCharacterFilterAppendPatched';
 const CHARACTER_SEARCH_OPTIMIZATION_KEY = 'baiBaiToolkitCharacterSearchOptimization';
 const REGEX_CONTAINER_SELECTOR = '#regex_container';
+const REGEX_EXTENSIONS_PANEL_SELECTOR = '#rm_extensions_block';
 const REGEX_SCRIPT_ROW_SELECTOR = '.regex-script-label';
 const REGEX_SCRIPT_LIST_SELECTOR = '#saved_regex_scripts, #saved_scoped_scripts, #saved_preset_scripts';
+const REGEX_CHAT_RELOAD_VISIBILITY_CHECK_DELAY_MS = 120;
+const REGEX_CHAT_RELOAD_VISIBILITY_FALLBACK_DELAY_MS = 1000;
 const WORLD_INFO_ENTRY_DRAWER_TOGGLE_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer > .inline-drawer-header .inline-drawer-toggle';
 const WORLD_INFO_ENTRY_DRAWER_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer';
 const WORLD_INFO_LAZY_SELECT2_SELECTOR = '#world_popup_entries_list .world_entry_edit select[name="characterFilter"], #world_popup_entries_list .world_entry_edit select[name="triggers"]';
@@ -3279,9 +3286,11 @@ function installRegexQuickOperationOptimization() {
         document.addEventListener('click', handler, true);
     }
 
+    installRegexVueNativeRenderGuard();
     installRegexQuickOperationMutationObserver();
     installOptimizedRegexImportHandler();
     installRegexVueManagerActionHandler();
+    installRegexVueScopedContextHandler();
     scheduleNativeRegexSortableGuard();
     void installRegexVueManager();
 }
@@ -3306,6 +3315,10 @@ function removeRegexQuickOperationOptimization() {
     state.nativeSortableGuardTimer = null;
     state.nativeSortableGuardRetries = 0;
     state.scriptTemplate = null;
+    void flushPendingRegexChatReload();
+    removeRegexChatReloadVisibilityWatch();
+    removeRegexVueNativeRenderGuard();
+    removeRegexVueScopedContextHandler();
     removeOptimizedRegexImportHandler();
     removeRegexVueManagerActionHandler();
     removeRegexVueManager();
@@ -3362,6 +3375,131 @@ function removeRegexVueManagerActionHandler() {
 
     document.removeEventListener('click', handler, true);
     delete extensionState[REGEX_VUE_MANAGER_CLICK_HANDLER_KEY];
+}
+
+function installRegexVueScopedContextHandler() {
+    if (extensionState[REGEX_VUE_SCOPED_CONTEXT_HANDLER_KEY]) {
+        return;
+    }
+
+    const handler = () => {
+        syncRegexVueScopedListFromContext();
+    };
+    const presetHandler = () => {
+        syncRegexVuePresetListFromContext();
+    };
+
+    extensionState[REGEX_VUE_SCOPED_CONTEXT_HANDLER_KEY] = { handler, presetHandler };
+    eventSource.on(event_types.CHAT_CHANGED, handler);
+    eventSource.on(event_types.CHARACTER_PAGE_LOADED, handler);
+    eventSource.on(event_types.PRESET_CHANGED, presetHandler);
+    eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, presetHandler);
+}
+
+function removeRegexVueScopedContextHandler() {
+    const entry = extensionState[REGEX_VUE_SCOPED_CONTEXT_HANDLER_KEY];
+
+    if (!entry) {
+        return;
+    }
+
+    const { handler, presetHandler } = entry;
+    eventSource.removeListener(event_types.CHAT_CHANGED, handler);
+    eventSource.removeListener(event_types.CHARACTER_PAGE_LOADED, handler);
+    eventSource.removeListener(event_types.PRESET_CHANGED, presetHandler);
+    eventSource.removeListener(event_types.OAI_PRESET_CHANGED_AFTER, presetHandler);
+    delete extensionState[REGEX_VUE_SCOPED_CONTEXT_HANDLER_KEY];
+}
+
+function installRegexVueNativeRenderGuard() {
+    const jquery = globalThis.jQuery;
+
+    if (extensionState[REGEX_VUE_NATIVE_RENDER_GUARD_KEY] || typeof jquery?.fn !== 'object') {
+        if (extensionState[REGEX_VUE_NATIVE_RENDER_GUARD_KEY]) {
+            extensionState[REGEX_VUE_NATIVE_RENDER_GUARD_KEY].enabled = true;
+        }
+        return;
+    }
+
+    const originalEmpty = jquery.fn.empty;
+    const originalAppend = jquery.fn.append;
+
+    if (typeof originalEmpty !== 'function' || typeof originalAppend !== 'function') {
+        console.warn(`${LOG_PREFIX} jQuery empty/append is unavailable; regex Vue native render guard was not installed`);
+        return;
+    }
+
+    const guard = {
+        enabled: true,
+        originalEmpty,
+        originalAppend,
+        patchedEmpty: null,
+        patchedAppend: null,
+    };
+
+    function patchedEmpty(...args) {
+        if (guard.enabled && shouldBlockRegexVueNativeListMutation(this)) {
+            return this;
+        }
+
+        return originalEmpty.apply(this, args);
+    }
+
+    function patchedAppend(...args) {
+        if (guard.enabled && shouldBlockRegexVueNativeListMutation(this)) {
+            return this;
+        }
+
+        return originalAppend.apply(this, args);
+    }
+
+    guard.patchedEmpty = patchedEmpty;
+    guard.patchedAppend = patchedAppend;
+    patchedEmpty.__baiBaiToolkitRegexVueNativeRenderGuard = true;
+    patchedAppend.__baiBaiToolkitRegexVueNativeRenderGuard = true;
+    patchedEmpty.__baiBaiToolkitOriginalEmpty = originalEmpty;
+    patchedAppend.__baiBaiToolkitOriginalAppend = originalAppend;
+    Object.assign(patchedEmpty, originalEmpty);
+    Object.assign(patchedAppend, originalAppend);
+    jquery.fn.empty = patchedEmpty;
+    jquery.fn.append = patchedAppend;
+    extensionState[REGEX_VUE_NATIVE_RENDER_GUARD_KEY] = guard;
+}
+
+function removeRegexVueNativeRenderGuard() {
+    const guard = extensionState[REGEX_VUE_NATIVE_RENDER_GUARD_KEY];
+
+    if (!guard) {
+        return;
+    }
+
+    guard.enabled = false;
+
+    if (globalThis.jQuery?.fn?.empty === guard.patchedEmpty) {
+        globalThis.jQuery.fn.empty = guard.originalEmpty;
+    }
+
+    if (globalThis.jQuery?.fn?.append === guard.patchedAppend) {
+        globalThis.jQuery.fn.append = guard.originalAppend;
+    }
+
+    if (globalThis.jQuery?.fn?.empty !== guard.patchedEmpty && globalThis.jQuery?.fn?.append !== guard.patchedAppend) {
+        delete extensionState[REGEX_VUE_NATIVE_RENDER_GUARD_KEY];
+    }
+}
+
+function shouldBlockRegexVueNativeListMutation(collection) {
+    if (!settings.regexQuickOperationOptimizationEnabled || !isRegexVueManagerActive()) {
+        return false;
+    }
+
+    return Array.from(collection ?? []).some(element => isRegexVueOwnedScriptListElement(element));
+}
+
+function isRegexVueOwnedScriptListElement(element) {
+    return element instanceof HTMLElement
+        && ['saved_regex_scripts', 'saved_scoped_scripts', 'saved_preset_scripts'].includes(element.id)
+        && element.querySelector(':scope > .bai-bai-regex-vue-list');
 }
 
 function handleRegexVueManagerActionClick(event) {
@@ -3456,7 +3594,9 @@ async function installRegexVueManager() {
 
         if (manager.app) {
             if (!areRegexVueManagerTargetsOwned()) {
-                clearRegexVueManagerTargets();
+                reclaimRegexVueManagerTargets();
+                scheduleNativeRegexSortableGuard(250);
+                return;
             }
 
             syncRegexVueManagerState();
@@ -3633,9 +3773,22 @@ function areRegexVueManagerTargetsOwned() {
     });
 }
 
+function reclaimRegexVueManagerTargets() {
+    const manager = getRegexVueManagerState();
+
+    if (!manager.state) {
+        return;
+    }
+
+    clearRegexVueManagerTargets();
+    manager.state.reclaimKey += 1;
+    updateRegexBulkControls();
+}
+
 function createRegexVueManagerModel() {
     return {
         renderKey: 0,
+        reclaimKey: 0,
         lists: {
             global: createEmptyRegexVueListModel('global'),
             preset: createEmptyRegexVueListModel('preset'),
@@ -3665,6 +3818,30 @@ function syncRegexVueManagerState() {
     manager.state.lists.scoped = buildRegexVueListModel(REGEX_SCRIPT_TYPES.SCOPED);
     pruneRegexVueSelection();
     manager.state.renderKey += 1;
+    updateRegexBulkControls();
+}
+
+function syncRegexVueScopedListFromContext() {
+    const manager = getRegexVueManagerState();
+
+    if (!manager.state) {
+        return;
+    }
+
+    manager.state.lists.scoped = buildRegexVueListModel(REGEX_SCRIPT_TYPES.SCOPED);
+    pruneRegexVueSelection();
+    updateRegexBulkControls();
+}
+
+function syncRegexVuePresetListFromContext() {
+    const manager = getRegexVueManagerState();
+
+    if (!manager.state) {
+        return;
+    }
+
+    manager.state.lists.preset = buildRegexVueListModel(REGEX_SCRIPT_TYPES.PRESET);
+    pruneRegexVueSelection();
     updateRegexBulkControls();
 }
 
@@ -3731,27 +3908,27 @@ function buildRegexVueListModel(scriptType) {
 }
 
 function createRegexVueManagerRootComponent(vue, vueDraggableNext, model) {
-    const { h, Teleport, Fragment } = vue;
+    const { h, Teleport, Transition, Fragment } = vue;
 
     return {
         name: 'BaiBaiRegexManagerRoot',
         render() {
             return h(Fragment, null, [
-                renderRegexVueTeleport(h, vueDraggableNext, Teleport, model, 'global', '#saved_regex_scripts'),
-                renderRegexVueTeleport(h, vueDraggableNext, Teleport, model, 'preset', '#saved_preset_scripts'),
-                renderRegexVueTeleport(h, vueDraggableNext, Teleport, model, 'scoped', '#saved_scoped_scripts'),
+                renderRegexVueTeleport(h, vueDraggableNext, Teleport, Transition, model, 'global', '#saved_regex_scripts'),
+                renderRegexVueTeleport(h, vueDraggableNext, Teleport, Transition, model, 'preset', '#saved_preset_scripts'),
+                renderRegexVueTeleport(h, vueDraggableNext, Teleport, Transition, model, 'scoped', '#saved_scoped_scripts'),
             ]);
         },
     };
 }
 
-function renderRegexVueTeleport(h, vueDraggableNext, Teleport, model, typeKey, selector) {
+function renderRegexVueTeleport(h, vueDraggableNext, Teleport, Transition, model, typeKey, selector) {
     return h(Teleport, { to: selector }, [
-        renderRegexVueList(h, vueDraggableNext, model, typeKey),
+        renderRegexVueList(h, vueDraggableNext, Transition, model, typeKey),
     ]);
 }
 
-function renderRegexVueList(h, vueDraggableNext, model, typeKey) {
+function renderRegexVueList(h, vueDraggableNext, Transition, model, typeKey) {
     const list = model.lists[typeKey];
     const hasRealGroups = list.groups.some(group => !group.isUngrouped);
     const scriptCount = list.groups.reduce((count, group) => count + group.scripts.length, 0);
@@ -3771,35 +3948,7 @@ function renderRegexVueList(h, vueDraggableNext, model, typeKey) {
             groupChildren.push(renderRegexVueGroupHeader(h, list, group));
         }
 
-        if (!group.collapsed) {
-            const rowRender = () => group.scripts.map(script => renderRegexVueScriptRow(h, model, list, script));
-            groupChildren.push(h(vueDraggableNext.VueDraggableNext, {
-                class: 'bai-bai-regex-group-body flex-container flexFlowColumn',
-                'data-regex-type': list.typeKey,
-                'data-regex-group-id': group.id,
-                list: group.scripts,
-                group: { name: `bai-bai-regex-scripts-${list.typeKey}`, pull: true, put: true },
-                draggable: '.regex-script-label',
-                handle: '.bai-bai-regex-script-drag-handle',
-                itemKey: 'id',
-                animation: 150,
-                forceFallback: true,
-                fallbackOnBody: true,
-                fallbackClass: 'bai-bai-regex-sortable-fallback',
-                ghostClass: 'bai-bai-regex-sortable-ghost',
-                chosenClass: 'bai-bai-regex-sortable-chosen',
-                dragClass: 'bai-bai-regex-sortable-drag',
-                move: event => isRegexVueScriptDragMoveAllowed(event, list.typeKey),
-                key: `body-${group.id}`,
-                onChoose: () => setRegexVueDragCursorActive(true),
-                onStart: () => setRegexVueDragCursorActive(true),
-                onUnchoose: () => setRegexVueDragCursorActive(false),
-                onEnd: () => {
-                    setRegexVueDragCursorActive(false);
-                    saveRegexScriptsOrderFromModelSafely(list.typeKey);
-                },
-            }, { default: rowRender }));
-        }
+        groupChildren.push(renderRegexVueGroupBodyTransition(h, vueDraggableNext, Transition, model, list, group));
 
         return h('div', {
             class: [
@@ -3820,29 +3969,89 @@ function renderRegexVueList(h, vueDraggableNext, model, typeKey) {
     return h('div', {
         class: 'bai-bai-regex-vue-list flex-container flexFlowColumn',
         'data-regex-type': typeKey,
-        key: `${typeKey}-${model.renderKey}`,
+        key: `${typeKey}-reclaim-${model.reclaimKey}`,
     }, children);
+}
+
+function renderRegexVueGroupBodyTransition(h, vueDraggableNext, Transition, model, list, group) {
+    return h(Transition, {
+        name: 'bai-bai-regex-group-collapse',
+        css: false,
+        key: `transition-${group.id}`,
+        onBeforeEnter: prepareRegexVueGroupBodyEnter,
+        onEnter: animateRegexVueGroupBodyEnter,
+        onAfterEnter: cleanupRegexVueGroupBodyTransition,
+        onEnterCancelled: cleanupRegexVueGroupBodyTransition,
+        onBeforeLeave: prepareRegexVueGroupBodyLeave,
+        onLeave: animateRegexVueGroupBodyLeave,
+        onAfterLeave: cleanupRegexVueGroupBodyTransition,
+        onLeaveCancelled: cleanupRegexVueGroupBodyTransition,
+    }, {
+        default: () => group.collapsed
+            ? null
+            : renderRegexVueGroupBody(h, vueDraggableNext, model, list, group),
+    });
+}
+
+function renderRegexVueGroupBody(h, vueDraggableNext, model, list, group) {
+    const rowRender = () => group.scripts.map(script => renderRegexVueScriptRow(h, model, list, script));
+
+    return h(vueDraggableNext.VueDraggableNext, {
+        class: 'bai-bai-regex-group-body flex-container flexFlowColumn',
+        'data-regex-type': list.typeKey,
+        'data-regex-group-id': group.id,
+        list: group.scripts,
+        group: { name: `bai-bai-regex-scripts-${list.typeKey}`, pull: true, put: true },
+        draggable: '.regex-script-label',
+        handle: '.bai-bai-regex-script-drag-handle',
+        itemKey: 'id',
+        animation: 150,
+        forceFallback: true,
+        fallbackOnBody: true,
+        fallbackClass: 'bai-bai-regex-sortable-fallback',
+        ghostClass: 'bai-bai-regex-sortable-ghost',
+        chosenClass: 'bai-bai-regex-sortable-chosen',
+        dragClass: 'bai-bai-regex-sortable-drag',
+        move: event => isRegexVueScriptDragMoveAllowed(event, list.typeKey),
+        key: `body-${group.id}`,
+        onChoose: () => setRegexVueDragCursorActive(true),
+        onStart: () => setRegexVueDragCursorActive(true),
+        onUnchoose: () => setRegexVueDragCursorActive(false),
+        onEnd: () => {
+            setRegexVueDragCursorActive(false);
+            saveRegexScriptsOrderFromModelSafely(list.typeKey);
+        },
+    }, { default: rowRender });
 }
 
 function renderRegexVueListToolbar(h, list) {
     return h('div', { class: 'bai-bai-regex-list-toolbar flex-container', key: 'toolbar' }, [
         h('div', {
-            class: 'menu_button menu_button_icon',
+            class: 'bai-bai-regex-create-group-btn',
             title: t`Create regex group`,
             onClick: () => void createRegexVueGroup(list.scriptType),
         }, [
-            h('i', { class: 'fa-solid fa-folder-plus' }),
-            h('small', null, t`Group`),
+            h('i', { class: 'fa-solid fa-folder-plus margin-r5' }),
+            h('span', null, t`Create Group`),
         ]),
     ]);
 }
 
 function renderRegexVueGroupHeader(h, list, group) {
-    return h('div', { class: 'bai-bai-regex-group-header flex-container flexnowrap', key: `header-${group.id}` }, [
+    return h('div', {
+        class: ['bai-bai-regex-group-header', 'flex-container', 'flexnowrap', group.collapsed ? 'collapsed' : ''],
+        key: `header-${group.id}`,
+        onClick: (event) => {
+            // Prevent collapsing when clicking on buttons inside the header
+            if (event.target.closest('.menu_button')) {
+                return;
+            }
+            toggleRegexVueGroupCollapsed(list.scriptType, group.id);
+        }
+    }, [
         h('span', {
-            class: ['bai-bai-regex-group-toggle fa-solid', group.collapsed ? 'fa-chevron-right' : 'fa-chevron-down'],
+            class: ['bai-bai-regex-group-toggle fa-solid fa-chevron-down'],
             title: group.collapsed ? t`Expand` : t`Collapse`,
-            onClick: () => toggleRegexVueGroupCollapsed(list.scriptType, group.id),
         }),
         h('strong', { class: 'bai-bai-regex-group-name flex1 overflow-hidden', title: group.name }, group.name),
         h('small', { class: 'bai-bai-regex-group-count' }, String(group.scripts.length)),
@@ -3969,6 +4178,135 @@ function isRegexVueScriptDragMoveAllowed(event, typeKey) {
     return getRegexScriptsByType(scriptType).some(script => script?.id === draggedScript.id);
 }
 
+function prepareRegexVueGroupBodyEnter(element) {
+    if (!(element instanceof HTMLElement)) {
+        return;
+    }
+
+    stopRegexVueGroupBodyTransition(element);
+    element.style.height = '0px';
+    element.style.opacity = '0';
+    element.style.overflow = 'hidden';
+    element.style.willChange = 'height, opacity';
+
+    // 强制重绘以确保初始状态被应用
+    void element.offsetHeight;
+}
+
+function animateRegexVueGroupBodyEnter(element, done) {
+    if (!(element instanceof HTMLElement)) {
+        done();
+        return;
+    }
+
+    const targetHeight = element.scrollHeight;
+    const transition = startRegexVueGroupBodyTransition(element, done);
+    if (!transition) {
+        return;
+    }
+
+    transition.raf = requestAnimationFrame(() => {
+        element.style.height = `${targetHeight}px`;
+        element.style.opacity = '1';
+    });
+}
+
+function prepareRegexVueGroupBodyLeave(element) {
+    if (!(element instanceof HTMLElement)) {
+        return;
+    }
+
+    stopRegexVueGroupBodyTransition(element);
+    element.style.height = `${element.scrollHeight}px`;
+    element.style.opacity = '1';
+    element.style.overflow = 'hidden';
+    element.style.willChange = 'height, opacity';
+
+    // 强制重绘以确保初始状态被应用
+    void element.offsetHeight;
+}
+
+function animateRegexVueGroupBodyLeave(element, done) {
+    if (!(element instanceof HTMLElement)) {
+        done();
+        return;
+    }
+
+    const transition = startRegexVueGroupBodyTransition(element, done);
+    if (!transition) {
+        return;
+    }
+
+    transition.raf = requestAnimationFrame(() => {
+        element.style.height = '0px';
+        element.style.opacity = '0';
+    });
+}
+
+function startRegexVueGroupBodyTransition(element, done) {
+    stopRegexVueGroupBodyTransition(element);
+
+    if (shouldSkipRegexVueGroupBodyTransition()) {
+        done();
+        return null;
+    }
+
+    let finished = false;
+    const finish = () => {
+        if (finished) {
+            return;
+        }
+
+        finished = true;
+        stopRegexVueGroupBodyTransition(element);
+        done();
+    };
+
+    const onTransitionEnd = event => {
+        if (event.target === element && (event.propertyName === 'height' || event.propertyName === 'opacity')) {
+            finish();
+        }
+    };
+
+    const transition = { timer: setTimeout(finish, REGEX_VUE_GROUP_COLLAPSE_ANIMATION_MS + 80), onTransitionEnd, raf: 0 };
+    element[REGEX_VUE_GROUP_BODY_TRANSITION_KEY] = transition;
+    element.addEventListener('transitionend', onTransitionEnd);
+    element.style.transition = `height ${REGEX_VUE_GROUP_COLLAPSE_ANIMATION_MS}ms ease, opacity ${REGEX_VUE_GROUP_COLLAPSE_ANIMATION_MS}ms ease`;
+    return transition;
+}
+
+function stopRegexVueGroupBodyTransition(element) {
+    const transition = element?.[REGEX_VUE_GROUP_BODY_TRANSITION_KEY];
+
+    if (!transition) {
+        return;
+    }
+
+    clearTimeout(transition.timer);
+    if (transition.raf) {
+        cancelAnimationFrame(transition.raf);
+    }
+    element.removeEventListener('transitionend', transition.onTransitionEnd);
+    delete element[REGEX_VUE_GROUP_BODY_TRANSITION_KEY];
+}
+
+function cleanupRegexVueGroupBodyTransition(element) {
+    if (!(element instanceof HTMLElement)) {
+        return;
+    }
+
+    stopRegexVueGroupBodyTransition(element);
+    element.style.height = '';
+    element.style.opacity = '';
+    element.style.overflow = '';
+    element.style.transition = '';
+    element.style.willChange = '';
+}
+
+function shouldSkipRegexVueGroupBodyTransition() {
+    return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+}
+
 function setRegexVueDragCursorActive(active) {
     document.body?.classList.toggle('bai-bai-regex-drag-cursor-active', Boolean(active));
 }
@@ -3990,8 +4328,24 @@ function installRegexVueManagerStyle() {
 }
 
 .bai-bai-regex-list-toolbar {
-    justify-content: flex-end;
+    justify-content: stretch;
     margin-bottom: 4px;
+}
+
+.bai-bai-regex-create-group-btn {
+    cursor: pointer;
+    text-align: center;
+    padding: 6px;
+    border: 1px dashed var(--SmartThemeBorderColor);
+    border-radius: 10px;
+    opacity: 0.7;
+    transition: opacity 0.2s, background-color 0.2s;
+    flex: 1;
+}
+
+.bai-bai-regex-create-group-btn:hover {
+    opacity: 1;
+    background-color: var(--SmartThemeBlurTintColor);
 }
 
 .bai-bai-regex-empty-list {
@@ -4048,38 +4402,63 @@ function installRegexVueManagerStyle() {
     margin-top: 6px;
 }
 
-.bai-bai-regex-group-header {
-    align-items: center;
-    padding: 4px 6px;
-    opacity: 0.95;
-}
-
-.bai-bai-regex-group-toggle {
-    cursor: pointer;
-    width: 18px;
-    text-align: center;
-}
-
-.bai-bai-regex-group-name {
-    margin-left: 4px;
-}
-
-.bai-bai-regex-group-count {
-    opacity: 0.7;
-    min-width: 2em;
-    text-align: right;
-}
-
-.bai-bai-regex-group-body {
-    min-height: 8px;
-}
-
 .bai-bai-regex-group-framed .bai-bai-regex-group-body {
-    padding: 6px;
+    padding: 0;
+    overflow: hidden;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+.bai-bai-regex-group-framed .regex-script-label {
+    border: none !important;
+    border-radius: 0 !important;
+    border-top: 1px solid var(--SmartThemeBorderColor) !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    padding-left: 10px;
+    padding-right: 10px;
+}
+
+.bai-bai-regex-group-framed .regex-script-label:first-child {
+    border-top: none !important;
 }
 
 .bai-bai-regex-group-framed .regex-script-label:last-child {
-    border-bottom: 0;
+    margin-bottom: 2px !important;
+}
+
+.bai-bai-regex-group-header {
+    align-items: center;
+    padding: 6px 10px;
+    opacity: 0.95;
+    background-color: var(--SmartThemeBlurTintColor);
+    border-top-left-radius: 9px;
+    border-top-right-radius: 9px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+    cursor: pointer;
+    user-select: none;
+}
+
+.bai-bai-regex-group-header:hover {
+    background-color: var(--SmartThemeChatTintColor);
+}
+
+.bai-bai-regex-group-toggle {
+    width: 18px;
+    text-align: center;
+    transition: transform 0.2s ease;
+    display: inline-block;
+}
+
+.bai-bai-regex-group-header.collapsed .bai-bai-regex-group-toggle {
+    transform: rotate(-90deg);
+}
+
+.bai-bai-regex-group-header.collapsed {
+    border-bottom: none;
+    border-bottom-left-radius: 9px;
+    border-bottom-right-radius: 9px;
+    transition: border-radius 0.2s;
 }
 
 .bai-bai-regex-sortable-ghost {
@@ -4299,7 +4678,23 @@ function toggleRegexVueGroupCollapsed(scriptType, groupId) {
 
     group.collapsed = !group.collapsed;
     saveRegexGroupSettings();
-    syncRegexVueManagerState();
+
+    if (!setRegexVueGroupCollapsedInModel(scriptType, groupId, group.collapsed)) {
+        syncRegexVueManagerState();
+    }
+}
+
+function setRegexVueGroupCollapsedInModel(scriptType, groupId, collapsed) {
+    const manager = getRegexVueManagerState();
+    const typeKey = getRegexScriptTypeKey(scriptType);
+    const group = manager.state?.lists?.[typeKey]?.groups?.find(item => item.id === groupId);
+
+    if (!group) {
+        return false;
+    }
+
+    group.collapsed = Boolean(collapsed);
+    return true;
 }
 
 function setRegexVueScriptSelected(scriptId, selected) {
@@ -4412,7 +4807,7 @@ async function setRegexVueScriptDisabled(scriptType, scriptId, disabled) {
     try {
         await saveRegexScriptList(scriptType, context.scripts);
         allowRegexScriptTypeAfterEditSave(scriptType);
-        await reloadCurrentChatForRegexChange();
+        queueRegexChatReloadAfterPanelClose();
     } catch (error) {
         if (modelScript) {
             modelScript.disabled = previousModelDisabled;
@@ -4467,7 +4862,7 @@ async function bulkToggleRegexVueScripts(enable) {
         }
 
         syncRegexVueManagerState();
-        await reloadCurrentChatForRegexChange();
+        queueRegexChatReloadAfterPanelClose();
     } catch (error) {
         console.debug(`${LOG_PREFIX} Failed to bulk toggle regex scripts`, error);
         toastr.error(t`Failed to save regex script state. See console for details.`);
@@ -4516,7 +4911,7 @@ async function moveRegexVueScript(fromType, scriptId, toType) {
         allowRegexScriptTypeAfterEditSave(toType);
         delete getRegexVueManagerState().state?.selectedIds?.[movedScript.id];
         syncRegexVueManagerState();
-        await reloadCurrentChatForRegexChange();
+        queueRegexChatReloadAfterPanelClose();
     } catch (error) {
         const targetIndex = targetScripts.indexOf(movedScript);
 
@@ -4591,7 +4986,7 @@ async function bulkMoveRegexVueScripts(toType) {
 
         allowRegexScriptTypeAfterEditSave(toType);
         syncRegexVueManagerState();
-        await reloadCurrentChatForRegexChange();
+        queueRegexChatReloadAfterPanelClose();
     } catch (error) {
         console.debug(`${LOG_PREFIX} Failed to bulk move regex scripts`, error);
         toastr.error(t`Failed to move regex script. See console for details.`);
@@ -4666,7 +5061,7 @@ async function deleteRegexVueScript(scriptType, scriptId) {
         delete getRegexVueManagerState().state?.selectedIds?.[scriptId];
         saveRegexGroupSettings();
         syncRegexVueManagerState();
-        await reloadCurrentChatForRegexChange();
+        queueRegexChatReloadAfterPanelClose();
     } catch (error) {
         if (removedScript) {
             context.scripts.splice(context.index, 0, removedScript);
@@ -4719,7 +5114,7 @@ async function bulkDeleteRegexVueScripts() {
 
         saveRegexGroupSettings();
         syncRegexVueManagerState();
-        await reloadCurrentChatForRegexChange();
+        queueRegexChatReloadAfterPanelClose();
     } catch (error) {
         console.debug(`${LOG_PREFIX} Failed to bulk delete regex scripts`, error);
         toastr.error(t`Failed to delete regex script. See console for details.`);
@@ -4855,7 +5250,7 @@ async function openOptimizedRegexEditorWithScript(scriptType, script) {
         ensureRegexScriptGroupMeta(scriptType, updatedScript.id);
         saveRegexGroupSettings();
         await syncRegexVueManagerAfterDataChange();
-        await reloadCurrentChatForRegexChange();
+        queueRegexChatReloadAfterPanelClose();
     } catch (error) {
         if (existingIndex === -1) {
             const insertedIndex = scripts.findIndex(item => item?.id === updatedScript.id);
@@ -5259,7 +5654,7 @@ async function moveOptimizedRegexScriptRow(row, toType) {
 
         targetList.append(row);
         updateRegexBulkControls();
-        await reloadCurrentChatForRegexChange();
+        queueRegexChatReloadAfterPanelClose();
     } catch (error) {
         const targetIndex = targetScripts.indexOf(movedScript);
 
@@ -5476,7 +5871,7 @@ async function setRegexScriptRowDisabled(row, nextDisabled) {
     try {
         await saveRegexScriptList(context.scriptType, context.scripts);
         allowRegexScriptTypeAfterEditSave(context.scriptType);
-        await reloadCurrentChatForRegexChange();
+        queueRegexChatReloadAfterPanelClose();
     } catch (error) {
         context.script.disabled = previousDisabled;
         updateRegexScriptRowDisabled(row, previousDisabled);
@@ -5504,7 +5899,7 @@ async function deleteRegexScriptRow(row) {
         await saveRegexScriptList(context.scriptType, context.scripts);
         row.remove();
         updateRegexBulkControls();
-        await reloadCurrentChatForRegexChange();
+        queueRegexChatReloadAfterPanelClose();
     } catch (error) {
         if (removedScript) {
             context.scripts.splice(context.index, 0, removedScript);
@@ -5568,7 +5963,7 @@ async function openOptimizedRegexEditor(row) {
         await saveRegexScriptList(context.scriptType, context.scripts);
         allowRegexScriptTypeAfterEditSave(context.scriptType);
         updateRegexScriptRowFromScript(row, updatedScript);
-        await reloadCurrentChatForRegexChange();
+        queueRegexChatReloadAfterPanelClose();
     } catch (error) {
         context.scripts[context.index] = previousScript;
         console.debug(`${LOG_PREFIX} Failed to save regex script edit`, error);
@@ -5752,6 +6147,8 @@ async function saveRegexScriptsOrderFromModel(typeKey) {
     const seen = new Set();
     const reorderedScripts = [];
     const groupState = getRegexGroupStateForScriptType(scriptType);
+    const previousScripts = scripts.slice();
+    const previousGroupScripts = cloneRegexGroupScriptsMeta(groupState.scripts);
     let mappedScriptCount = 0;
 
     for (const group of list.groups) {
@@ -5780,6 +6177,7 @@ async function saveRegexScriptsOrderFromModel(typeKey) {
     if (scripts.length > 0 && mappedScriptCount === 0) {
         console.debug(`${LOG_PREFIX} Regex Vue order save skipped because the drag model contains no known scripts`);
         toastr.error(t`Regex order was not saved because the drag result was invalid.`);
+        restoreRegexGroupScriptsMeta(groupState, previousGroupScripts);
         syncRegexVueManagerState();
         return;
     }
@@ -5792,14 +6190,36 @@ async function saveRegexScriptsOrderFromModel(typeKey) {
 
     if (reorderedScripts.length !== scripts.length) {
         console.debug(`${LOG_PREFIX} Regex Vue order save skipped because model and data lengths differ`);
+        restoreRegexGroupScriptsMeta(groupState, previousGroupScripts);
         syncRegexVueManagerState();
         return;
     }
 
-    await saveRegexScriptList(scriptType, reorderedScripts);
-    saveRegexGroupSettings();
-    syncRegexVueManagerState();
-    await reloadCurrentChatForRegexChange();
+    scripts.splice(0, scripts.length, ...reorderedScripts);
+
+    try {
+        await saveRegexScriptList(scriptType, scripts);
+        saveRegexGroupSettings();
+        queueRegexChatReloadAfterPanelClose();
+    } catch (error) {
+        scripts.splice(0, scripts.length, ...previousScripts);
+        restoreRegexGroupScriptsMeta(groupState, previousGroupScripts);
+        throw error;
+    }
+}
+
+function cloneRegexGroupScriptsMeta(scriptsMeta) {
+    const clone = {};
+
+    for (const [scriptId, meta] of Object.entries(scriptsMeta ?? {})) {
+        clone[scriptId] = meta && typeof meta === 'object' ? { ...meta } : meta;
+    }
+
+    return clone;
+}
+
+function restoreRegexGroupScriptsMeta(groupState, scriptsMeta) {
+    groupState.scripts = cloneRegexGroupScriptsMeta(scriptsMeta);
 }
 
 function saveRegexScriptsOrderFromModelSafely(typeKey) {
@@ -5845,6 +6265,153 @@ function allowRegexScriptTypeAfterEditSave(scriptType) {
     if (scriptType === REGEX_SCRIPT_TYPES.PRESET) {
         allowRegexPresetScripts(getRegexCurrentPresetAPI(), getRegexCurrentPresetName());
     }
+}
+
+function queueRegexChatReloadAfterPanelClose() {
+    if (!getCurrentChatId()) {
+        return;
+    }
+
+    const state = getRegexQuickOperationState();
+    state.pendingChatReload = true;
+    installRegexChatReloadVisibilityObserver();
+    scheduleRegexChatReloadVisibilityCheck(0);
+}
+
+function installRegexChatReloadVisibilityObserver() {
+    const state = getRegexQuickOperationState();
+
+    if (state.chatReloadVisibilityObserver || typeof MutationObserver !== 'function') {
+        return;
+    }
+
+    const observer = new MutationObserver(() => {
+        scheduleRegexChatReloadVisibilityCheck();
+    });
+
+    state.chatReloadVisibilityObserver = observer;
+
+    for (const target of getRegexChatReloadVisibilityTargets()) {
+        observer.observe(target, {
+            attributes: true,
+            attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'],
+        });
+    }
+}
+
+function getRegexChatReloadVisibilityTargets() {
+    const targets = [];
+    const seen = new Set();
+    const add = element => {
+        if (element instanceof HTMLElement && !seen.has(element)) {
+            seen.add(element);
+            targets.push(element);
+        }
+    };
+
+    const regexContainer = document.querySelector(REGEX_CONTAINER_SELECTOR);
+    const extensionsPanel = document.querySelector(REGEX_EXTENSIONS_PANEL_SELECTOR);
+
+    add(regexContainer);
+    add(extensionsPanel);
+
+    if (regexContainer instanceof HTMLElement) {
+        for (let element = regexContainer.parentElement; element && element !== document.body; element = element.parentElement) {
+            add(element);
+
+            if (element.matches(REGEX_EXTENSIONS_PANEL_SELECTOR)) {
+                break;
+            }
+        }
+    }
+
+    return targets;
+}
+
+function scheduleRegexChatReloadVisibilityCheck(delayMs = REGEX_CHAT_RELOAD_VISIBILITY_CHECK_DELAY_MS) {
+    const state = getRegexQuickOperationState();
+    clearTimeout(state.chatReloadVisibilityTimer);
+    state.chatReloadVisibilityTimer = setTimeout(() => {
+        state.chatReloadVisibilityTimer = null;
+        checkPendingRegexChatReload();
+    }, delayMs);
+}
+
+function checkPendingRegexChatReload() {
+    const state = getRegexQuickOperationState();
+
+    if (!state.pendingChatReload) {
+        removeRegexChatReloadVisibilityWatch();
+        return;
+    }
+
+    if (!isRegexPanelVisible()) {
+        void flushPendingRegexChatReload();
+        return;
+    }
+
+    scheduleRegexChatReloadVisibilityCheck(REGEX_CHAT_RELOAD_VISIBILITY_FALLBACK_DELAY_MS);
+}
+
+async function flushPendingRegexChatReload() {
+    const state = getRegexQuickOperationState();
+
+    if (!state.pendingChatReload || state.chatReloadInFlight) {
+        return;
+    }
+
+    state.pendingChatReload = false;
+    state.chatReloadInFlight = true;
+    removeRegexChatReloadVisibilityWatch();
+
+    try {
+        await reloadCurrentChatForRegexChange();
+    } catch (error) {
+        console.debug(`${LOG_PREFIX} Failed to reload chat after regex change`, error);
+    } finally {
+        state.chatReloadInFlight = false;
+
+        if (state.pendingChatReload) {
+            installRegexChatReloadVisibilityObserver();
+            scheduleRegexChatReloadVisibilityCheck();
+        }
+    }
+}
+
+function removeRegexChatReloadVisibilityWatch() {
+    const state = getRegexQuickOperationState();
+    clearTimeout(state.chatReloadVisibilityTimer);
+    state.chatReloadVisibilityTimer = null;
+
+    if (state.chatReloadVisibilityObserver) {
+        state.chatReloadVisibilityObserver.disconnect();
+        state.chatReloadVisibilityObserver = null;
+    }
+}
+
+function isRegexPanelVisible() {
+    const regexContainer = document.querySelector(REGEX_CONTAINER_SELECTOR);
+
+    if (!isRegexReloadVisibilityElementVisible(regexContainer)) {
+        return false;
+    }
+
+    const extensionsPanel = document.querySelector(REGEX_EXTENSIONS_PANEL_SELECTOR);
+
+    if (extensionsPanel instanceof HTMLElement && !isRegexReloadVisibilityElementVisible(extensionsPanel)) {
+        return false;
+    }
+
+    return true;
+}
+
+function isRegexReloadVisibilityElementVisible(element) {
+    if (!(element instanceof HTMLElement) || !element.isConnected || element.getClientRects().length === 0) {
+        return false;
+    }
+
+    const style = getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
 }
 
 async function reloadCurrentChatForRegexChange() {
