@@ -50,7 +50,7 @@
                                 title="长聊天进入后自动滚到底部，并在当前聊天 DOM 文本量较大时为楼层启用 content-visibility 和缓存占位高度，减少屏幕外楼层重排绘制。">
                                 <input id="bai_bai_toolkit_long_chat_dom_render_optimization_enabled" type="checkbox"
                                     class="checkbox">
-                                <span>长聊天 DOM 渲染优化</span>
+                                <span>长聊天渲染优化</span>
                             </label>
                             <label class="checkbox_label" for="bai_bai_toolkit_fast_chat_list_enabled"
                                 title="普通角色空搜索时，先显示轻量聊天文件列表，再补齐详细信息。">
@@ -146,6 +146,11 @@
                     <fieldset style="border: 1px solid var(--SmartThemeBorderColor); border-radius: 5px; padding: 8px; margin-bottom: 10px;">
                         <legend style="font-size: 0.9em; font-weight: bold; opacity: 0.8;"><i class="fa-solid fa-desktop"></i> 其他优化</legend>
                         <div class="flex-container flexFlowColumn" style="gap: 5px;">
+                            <label class="checkbox_label" for="bai_bai_toolkit_regex_quick_operation_enabled"
+                                title="启用后，正则条目的单条启用/禁用、编辑保存、删除和拖拽排序只更新对应 DOM，不立即重建整份正则列表。">
+                                <input id="bai_bai_toolkit_regex_quick_operation_enabled" type="checkbox" class="checkbox">
+                                <span>正则快速操作</span>
+                            </label>
                             <label class="checkbox_label" for="bai_bai_toolkit_description_codemirror_editor_enabled"
                                 title="使用 CodeMirror 6 替代原生 textarea 编辑角色描述；加载失败时直接恢复 ST 原版输入框。">
                                 <input id="bai_bai_toolkit_description_codemirror_editor_enabled" type="checkbox" class="checkbox">
@@ -165,6 +170,11 @@
                                 title="世界书条目展开/收起时跳过高度动画，保留已初始化的编辑区，并延迟初始化部分较重的下拉控件和角色过滤选项。">
                                 <input id="bai_bai_toolkit_world_info_drawer_optimization_enabled" type="checkbox" class="checkbox">
                                 <span>世界书条目快速展开</span>
+                            </label>
+                            <label class="checkbox_label" for="bai_bai_toolkit_character_search_input_optimization_enabled"
+                                title="拦截并防抖角色搜索输入框，解决拼音输入卡顿问题，并且大幅减少 DOM 重绘开销。">
+                                <input id="bai_bai_toolkit_character_search_input_optimization_enabled" type="checkbox" class="checkbox">
+                                <span>角色搜索输入框优化</span>
                             </label>
 
                             <div class="bai_bai_toolkit_perf_trace flex-container flexFlowColumn" style="display: none !important;"
@@ -191,8 +201,20 @@
                 <!-- 附加功能 (Features) - 默认隐藏 -->
                 <div id="bai_bai_toolkit_tab_features" class="bai_bai_toolkit_tab_content" style="display: none; padding-top: 5px;">
                     <div class="flex-container flexFlowColumn" style="gap: 5px;">
+                        <label class="checkbox_label" for="bai_bai_toolkit_update_prompt_on_available_enabled"
+                            title="检测到插件有可用更新时自动弹出更新确认提示；关闭后仍会显示 new 标记和更新按钮。">
+                            <input id="bai_bai_toolkit_update_prompt_on_available_enabled" type="checkbox"
+                                class="checkbox">
+                            <span>检测到更新弹窗提示</span>
+                        </label>
+                        <label class="checkbox_label" for="bai_bai_toolkit_message_double_click_edit_enabled"
+                            title="双击消息气泡快速进入编辑模式；开启后会自动关闭三击编辑楼层。">
+                            <input id="bai_bai_toolkit_message_double_click_edit_enabled" type="checkbox"
+                                class="checkbox">
+                            <span>双击编辑楼层</span>
+                        </label>
                         <label class="checkbox_label" for="bai_bai_toolkit_message_triple_click_edit_enabled"
-                            title="三击消息气泡快速进入编辑模式。">
+                            title="三击消息气泡快速进入编辑模式；开启后会自动关闭双击编辑楼层。">
                             <input id="bai_bai_toolkit_message_triple_click_edit_enabled" type="checkbox"
                                 class="checkbox">
                             <span>三击编辑楼层</span>

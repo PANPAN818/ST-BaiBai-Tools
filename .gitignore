@@ -1,1 +1,5 @@
 .codex-codemirror-build/
+node_modules/
+.npm-cache/
+package.json
+package-lock.json
