@@ -3764,9 +3764,10 @@ function renderRegexVueList(h, vueDraggableNext, model, typeKey) {
     }
 
     const groupChildren = list.groups.map(group => {
+        const showGroupHeader = !group.isUngrouped || hasRealGroups;
         const groupChildren = [];
 
-        if (!group.isUngrouped || hasRealGroups) {
+        if (showGroupHeader) {
             groupChildren.push(renderRegexVueGroupHeader(h, list, group));
         }
 
@@ -3801,7 +3802,11 @@ function renderRegexVueList(h, vueDraggableNext, model, typeKey) {
         }
 
         return h('div', {
-            class: ['bai-bai-regex-group', group.isUngrouped ? 'bai-bai-regex-group-ungrouped' : ''],
+            class: [
+                'bai-bai-regex-group',
+                showGroupHeader ? 'bai-bai-regex-group-framed' : '',
+                group.isUngrouped ? 'bai-bai-regex-group-ungrouped' : '',
+            ],
             'data-regex-group-id': group.id,
             key: group.id,
         }, groupChildren);
@@ -4036,12 +4041,16 @@ function installRegexVueManagerStyle() {
     gap: 2px;
 }
 
-.bai-bai-regex-group-header {
-    align-items: center;
+.bai-bai-regex-group-framed {
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 10px;
-    padding: 2px 6px;
-    margin-top: 4px;
+    gap: 0;
+    margin-top: 6px;
+}
+
+.bai-bai-regex-group-header {
+    align-items: center;
+    padding: 4px 6px;
     opacity: 0.95;
 }
 
@@ -4063,6 +4072,14 @@ function installRegexVueManagerStyle() {
 
 .bai-bai-regex-group-body {
     min-height: 8px;
+}
+
+.bai-bai-regex-group-framed .bai-bai-regex-group-body {
+    padding: 6px;
+}
+
+.bai-bai-regex-group-framed .regex-script-label:last-child {
+    border-bottom: 0;
 }
 
 .bai-bai-regex-sortable-ghost {
