@@ -53,6 +53,7 @@ const REGEX_VUE_DRAGGABLE_MODULE_PATH = './vendor/vue-draggable-next.esm-browser
 const REGEX_UNGROUPED_GROUP_ID = '__ungrouped';
 const REGEX_PENDING_ASSIGNMENT_GROUP_ID = '__pending_assignment';
 const REGEX_VUE_GROUP_BODY_TRANSITION_KEY = '__baiBaiToolkitRegexVueGroupBodyTransition';
+const REGEX_VUE_DROP_TARGET_CLASS = 'bai-bai-regex-drop-target';
 const REGEX_VUE_GROUP_COLLAPSE_ANIMATION_MS = 180;
 const DESCRIPTION_EDITOR_SOURCE_SELECTOR = '#description_textarea';
 const DESCRIPTION_EDITOR_SOURCE_HIDDEN_CLASS = 'bai-bai-toolkit-description-source-hidden';
@@ -4074,7 +4075,10 @@ function renderRegexVueGroupBody(h, vueDraggableNext, model, list, group) {
     const rowRender = () => group.scripts.map(script => renderRegexVueScriptRow(h, model, list, script));
 
     return h(vueDraggableNext.VueDraggableNext, {
-        class: 'bai-bai-regex-group-body flex-container flexFlowColumn',
+        class: [
+            'bai-bai-regex-group-body flex-container flexFlowColumn',
+            group.scripts.length === 0 ? 'bai-bai-regex-group-body-empty' : '',
+        ],
         'data-regex-type': list.typeKey,
         'data-regex-group-id': group.id,
         list: group.scripts,
@@ -4083,13 +4087,14 @@ function renderRegexVueGroupBody(h, vueDraggableNext, model, list, group) {
         handle: '.bai-bai-regex-script-drag-handle',
         itemKey: 'id',
         animation: 0,
+        emptyInsertThreshold: 40,
         forceFallback: true,
         fallbackOnBody: true,
         fallbackClass: 'bai-bai-regex-sortable-fallback',
         ghostClass: 'bai-bai-regex-sortable-ghost',
         chosenClass: 'bai-bai-regex-sortable-chosen',
         dragClass: 'bai-bai-regex-sortable-drag',
-        move: event => isRegexVueScriptDragMoveAllowed(event, list.typeKey),
+        move: event => handleRegexVueScriptDragMove(event, list.typeKey),
         key: `body-${group.id}`,
         onChoose: () => setRegexVueDragCursorActive(true),
         onStart: () => setRegexVueDragCursorActive(true),
@@ -4316,6 +4321,18 @@ function isRegexVueScriptDragMoveAllowed(event, typeKey) {
     return getRegexScriptsByType(scriptType).some(script => script?.id === draggedScript.id);
 }
 
+function handleRegexVueScriptDragMove(event, typeKey) {
+    const allowed = isRegexVueScriptDragMoveAllowed(event, typeKey);
+
+    if (allowed) {
+        setRegexVueDropTargetFromList(event?.to);
+    } else {
+        clearRegexVueDropTarget();
+    }
+
+    return allowed;
+}
+
 function prepareRegexVueGroupBodyEnter(element) {
     if (!(element instanceof HTMLElement)) {
         return;
@@ -4447,6 +4464,33 @@ function shouldSkipRegexVueGroupBodyTransition() {
 
 function setRegexVueDragCursorActive(active) {
     document.body?.classList.toggle('bai-bai-regex-drag-cursor-active', Boolean(active));
+
+    if (!active) {
+        clearRegexVueDropTarget();
+    }
+}
+
+function setRegexVueDropTargetFromList(listElement) {
+    const target = listElement instanceof HTMLElement
+        ? listElement.closest('.bai-bai-regex-group')
+        : null;
+    const currentTarget = document.querySelector(`.${REGEX_VUE_DROP_TARGET_CLASS}`);
+
+    if (currentTarget === target) {
+        return;
+    }
+
+    clearRegexVueDropTarget();
+
+    if (target instanceof HTMLElement) {
+        target.classList.add(REGEX_VUE_DROP_TARGET_CLASS);
+    }
+}
+
+function clearRegexVueDropTarget() {
+    document.querySelectorAll(`.${REGEX_VUE_DROP_TARGET_CLASS}`).forEach(element => {
+        element.classList.remove(REGEX_VUE_DROP_TARGET_CLASS);
+    });
 }
 
 function installRegexVueManagerStyle() {
@@ -4538,6 +4582,7 @@ function installRegexVueManagerStyle() {
     border-radius: 10px;
     gap: 0;
     margin-top: 6px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .bai-bai-regex-group-framed .bai-bai-regex-group-body {
@@ -4545,6 +4590,26 @@ function installRegexVueManagerStyle() {
     min-height: 8px;
     border-bottom-left-radius: 10px;
     border-bottom-right-radius: 10px;
+    transition: min-height 0.15s ease, background-color 0.15s ease;
+}
+
+body.bai-bai-regex-drag-cursor-active .bai-bai-regex-group-framed .bai-bai-regex-group-body-empty {
+    min-height: 44px;
+}
+
+.bai-bai-regex-group.bai-bai-regex-drop-target {
+    outline: 2px solid var(--SmartThemeQuoteColor);
+    outline-offset: 1px;
+}
+
+.bai-bai-regex-group.bai-bai-regex-drop-target.bai-bai-regex-group-framed {
+    border-color: var(--SmartThemeQuoteColor);
+    box-shadow: 0 0 0 1px var(--SmartThemeQuoteColor);
+}
+
+.bai-bai-regex-group.bai-bai-regex-drop-target .bai-bai-regex-group-header,
+.bai-bai-regex-group.bai-bai-regex-drop-target .bai-bai-regex-group-body {
+    background-color: var(--SmartThemeChatTintColor);
 }
 
 .bai-bai-regex-group-framed .regex-script-label {
