@@ -2741,6 +2741,7 @@ function createCustomCssCodeMirrorView(state, source, wrapper, modules) {
                 minWidth: '0',
                 overflow: 'hidden',
                 textShadow: 'none',
+                textAlign: 'left',
                 width: '100%',
             },
             '&.cm-focused': {
@@ -2765,10 +2766,12 @@ function createCustomCssCodeMirrorView(state, source, wrapper, modules) {
                 minWidth: '0',
                 padding: '8px',
                 textShadow: 'none',
+                textAlign: 'left',
                 minHeight: '180px',
             },
             '.cm-line': {
                 padding: '0',
+                textAlign: 'left',
             },
         }, { dark: colorScheme === 'dark' }),
     ];
@@ -3119,6 +3122,14 @@ function applyCustomCssCodeMirrorEditorStyle() {
     height: 100%;
     max-height: none !important;
     min-height: 0 !important;
+}
+
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID},
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID} .cm-editor,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID} .cm-scroller,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID} .cm-content,
+#${CUSTOM_CSS_CODEMIRROR_EDITOR_ID} .cm-line {
+    text-align: left !important;
 }
 
 #CustomCSS-textAreaBlock.${CUSTOM_CSS_HOST_CLASS},

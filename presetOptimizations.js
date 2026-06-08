@@ -2452,6 +2452,7 @@ function createPresetPromptCodeMirrorView(state, source, wrapper, modules) {
                 minWidth: '0',
                 overflow: 'hidden',
                 textShadow: 'none',
+                textAlign: 'left',
                 width: '100%',
             },
             '&.cm-focused': {
@@ -2474,10 +2475,12 @@ function createPresetPromptCodeMirrorView(state, source, wrapper, modules) {
                 minWidth: '0',
                 padding: '8px',
                 textShadow: 'none',
+                textAlign: 'left',
                 minHeight: 'min(34vh, 360px)',
             },
             '.cm-line': {
                 padding: '0',
+                textAlign: 'left',
             },
         }),
     ];
@@ -2660,6 +2663,14 @@ function applyPresetPromptCodeMirrorEditorStyle() {
     height: 100%;
     max-height: none !important;
     min-height: 0 !important;
+}
+
+#${PRESET_PROMPT_CODEMIRROR_EDITOR_ID},
+#${PRESET_PROMPT_CODEMIRROR_EDITOR_ID} .cm-editor,
+#${PRESET_PROMPT_CODEMIRROR_EDITOR_ID} .cm-scroller,
+#${PRESET_PROMPT_CODEMIRROR_EDITOR_ID} .cm-content,
+#${PRESET_PROMPT_CODEMIRROR_EDITOR_ID} .cm-line {
+    text-align: left !important;
 }
 
 .${PRESET_PROMPT_SOURCE_HIDDEN_CLASS} {
