@@ -17,6 +17,7 @@ const PRESET_DRAG_PATCH_KEY = '__baiBaiToolkitPresetDragPatch';
 const PRESET_SWITCH_BEFORE_HANDLER_KEY = '__baiBaiToolkitPresetSwitchBeforeHandler';
 const PRESET_SWITCH_HANDLER_KEY = '__baiBaiToolkitPresetSwitchHandler';
 const PRESET_MODEL_CHANGE_HANDLER_KEY = '__baiBaiToolkitPresetModelChangeHandler';
+const PRESET_CHAT_LOADED_HANDLER_KEY = '__baiBaiToolkitPresetChatLoadedHandler';
 const PRESET_SELECT_CHANGE_HANDLER_KEY = '__baiBaiToolkitPresetSelectChangeHandler';
 const PRESET_DELETE_HANDLER_KEY = '__baiBaiToolkitPresetDeleteHandler';
 const PRESET_LIST_ACTION_HANDLER_KEY = '__baiBaiToolkitPresetListActionHandler';
@@ -42,6 +43,7 @@ const PRESET_PROMPT_CODEMIRROR_READONLY_CLASS = 'bai-bai-toolkit-preset-prompt-r
 const PRESET_PROMPT_CODEMIRROR_MAXIMIZED_CLASS = 'bai-bai-toolkit-preset-prompt-maximized';
 const PRESET_DRAG_INTERACTIVE_SELECTOR = '.prompt_manager_prompt_controls, .prompt-manager-detach-action, .prompt-manager-inspect-action, .prompt-manager-edit-action, .prompt-manager-toggle-action, a, button, input, select, textarea, [contenteditable="true"]';
 const BAIBAOKU_TOKENIZER_BULK_COUNT_URL = '/api/plugins/baibaoku/v1/tokenizers/bulk-count';
+const PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS = 2000;
 const PRESET_DRAG_READY_CLASS = 'bai-bai-toolkit-preset-drag-ready';
 const PRESET_DRAG_ACTIVE_CLASS = 'bai-bai-toolkit-preset-drag-active';
 const PRESET_DRAG_SOURCE_CLASS = 'bai-bai-toolkit-preset-drag-source';
@@ -1188,6 +1190,7 @@ function applyPresetSwitchOptimization() {
     applyPresetListActionDelegation();
     applyPresetSwitchBeforeOptimization();
     applyPresetModelChangeTokenRefreshOptimization();
+    applyPresetChatLoadedTokenRefreshOptimization();
 
     if (extensionState[PRESET_SWITCH_HANDLER_KEY]) {
         return;
@@ -1224,18 +1227,65 @@ function applyPresetModelChangeTokenRefreshOptimization() {
     }
 }
 
+function applyPresetChatLoadedTokenRefreshOptimization() {
+    if (extensionState[PRESET_CHAT_LOADED_HANDLER_KEY]) {
+        return;
+    }
+
+    const handler = () => {
+        void handleChatLoadedForPromptManager();
+    };
+
+    extensionState[PRESET_CHAT_LOADED_HANDLER_KEY] = handler;
+
+    if (typeof eventSource.makeFirst === 'function') {
+        eventSource.makeFirst(event_types.CHAT_LOADED, handler);
+    } else {
+        eventSource.on(event_types.CHAT_LOADED, handler);
+    }
+}
+
 async function handleChatCompletionModelChangedForPromptManager() {
     if (!settings.presetSwitchOptimizationEnabled || !isPromptManagerReadyForFastPresetSwitch()) {
         return;
     }
 
     try {
-        suppressPromptManagerDebouncedRenderForCurrentTick();
+        suppressPromptManagerDebouncedRender();
         await renderPromptManagerListWithoutTokenStats();
         markPromptManagerTokensPending();
         refreshPromptManagerTokensAfterPresetSwitchDebounced();
     } catch (error) {
         console.debug(`${LOG_PREFIX} Failed to fast-refresh prompt manager after model change`, error);
+    }
+}
+
+async function handleChatLoadedForPromptManager() {
+    if (!settings.presetSwitchOptimizationEnabled || !isPromptManagerReadyForFastPresetSwitch()) {
+        return;
+    }
+
+    try {
+        suppressPromptManagerDebouncedRender(PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS);
+        setTimeout(() => {
+            void fastRefreshPromptManagerTokensAfterContextChange('chat load');
+        }, 0);
+    } catch (error) {
+        console.debug(`${LOG_PREFIX} Failed to schedule fast prompt manager refresh after chat load`, error);
+    }
+}
+
+async function fastRefreshPromptManagerTokensAfterContextChange(reason) {
+    try {
+        if (!isPromptManagerReadyForFastPresetSwitch()) {
+            return;
+        }
+
+        await renderPromptManagerListWithoutTokenStats();
+        markPromptManagerTokensPending();
+        refreshPromptManagerTokensAfterPresetSwitchDebounced();
+    } catch (error) {
+        console.debug(`${LOG_PREFIX} Failed to fast-refresh prompt manager after ${reason}`, error);
     }
 }
 
@@ -1471,7 +1521,7 @@ async function handleOpenAiPresetChangedAfter() {
             markPromptManagerTokensPending();
         }
 
-        suppressPromptManagerDebouncedRenderForCurrentTick();
+        suppressPromptManagerDebouncedRender();
         refreshPromptManagerTokensAfterPresetSwitchDebounced();
     } catch (error) {
         console.debug(`${LOG_PREFIX} Failed to fast-render prompt manager after preset switch`, error);
@@ -1714,7 +1764,7 @@ function waitForNextPaint() {
     });
 }
 
-function suppressPromptManagerDebouncedRenderForCurrentTick() {
+function suppressPromptManagerDebouncedRender(restoreDelayMs = 0) {
     const originalRenderDebounced = promptManager.renderDebounced;
 
     if (typeof originalRenderDebounced !== 'function' || originalRenderDebounced.__baiBaiToolkitPresetSwitchSuppressed) {
@@ -1730,7 +1780,7 @@ function suppressPromptManagerDebouncedRenderForCurrentTick() {
         if (promptManager?.renderDebounced === suppressedRenderDebounced) {
             promptManager.renderDebounced = originalRenderDebounced;
         }
-    }, 0);
+    }, Math.max(0, Number(restoreDelayMs) || 0));
 }
 
 function applyPresetToggleOptimization() {

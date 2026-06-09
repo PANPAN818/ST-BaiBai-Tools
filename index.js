@@ -35,8 +35,11 @@ const FAST_CHARACTER_LIST_FETCH_KEY = '__baiBaiToolkitFastCharacterListFetchPatc
 const BAIBAOKU_EARLY_BRIDGE_KEY = '__baibaokuEarlyBridge';
 const BAIBAOKU_STATUS_URL = '/api/plugins/baibaoku/v1/status';
 const BAIBAOKU_FAST_CONFIG_URL = '/api/plugins/baibaoku/v1/fast-config';
+const BAIBAOKU_FAST_CHAT_GET_URL = '/api/plugins/baibaoku/v1/chats/fast-get';
 const BAIBAOKU_STATUS_TIMEOUT_MS = 3000;
+const BAIBAOKU_PANEL_STATUS_CACHE_MS = 5 * 60_000;
 const SAVE_REQUEST_GZIP_FETCH_KEY = '__baiBaiToolkitSaveRequestGzipFetchPatched';
+const FAST_CHAT_GET_FETCH_KEY = '__baiBaiToolkitFastChatGetFetchPatched';
 const PERFORMANCE_TRACE_FETCH_KEY = '__baiBaiToolkitPerformanceTraceFetchPatched';
 const TRANSLATE_MESSAGE_UPDATED_OPTIMIZATION_KEY = '__baiBaiToolkitTranslateMessageUpdatedOptimized';
 const CUSTOM_CSS_INPUT_OPTIMIZATION_KEY = '__baiBaiToolkitCustomCssInputOptimized';
@@ -145,6 +148,31 @@ const SAVE_REQUEST_GZIP_PATHS = new Set([
     '/api/chats/save',
     '/api/chats/group/save',
 ]);
+const FAST_CHAT_GET_PATHS = new Set([
+    '/api/chats/get',
+    '/api/chats/group/get',
+]);
+const FAST_CHAT_GET_SAVE_PATHS = new Set([
+    '/api/chats/save',
+    '/api/chats/group/save',
+]);
+const FAST_CHAT_GET_DEFAULT_THRESHOLD_BYTES = 2 * 1024 * 1024;
+const FAST_CHAT_GET_DEFAULT_INITIAL_MESSAGES = 5;
+const FAST_CHAT_GET_ACTION_SELECTOR = [
+    '#send_but',
+    '#option_regenerate',
+    '#option_continue',
+    '#option_impersonate',
+    '#mes_continue',
+    '#mes_impersonate',
+    '#chat .mes_edit',
+    '#chat .mes_edit_done',
+    '#chat .mes_delete',
+    '#chat .del_mes',
+    '#chat .swipe_left',
+    '#chat .swipe_right',
+    '#show_more_messages',
+].join(', ');
 const FAST_SETTINGS_BOOTSTRAP_CACHE_MS = 15_000;
 const PERFORMANCE_TRACE_FETCH_PATHS = new Set([
     '/api/chats/get',
@@ -211,6 +239,7 @@ const defaultSettings = {
     baibaokuSettingsAccelerationEnabled: true,
     fastCharacterListEnabled: true,
     recentChatListAccelerationEnabled: true,
+    progressiveChatLoadingEnabled: true,
     tokenizerBulkCountEnabled: true,
     characterListAvatarLazyLoadEnabled: true,
     fastChatListEnabled: true,
@@ -445,6 +474,25 @@ async function setBaibaokuRecentChatListAccelerationEnabled(enabled) {
     }
 }
 
+async function setBaibaokuProgressiveChatLoadingEnabled(enabled) {
+    const next = Boolean(enabled);
+    const previous = settings.progressiveChatLoadingEnabled === true;
+    settings.progressiveChatLoadingEnabled = next;
+    applyFastChatGetOptimization();
+
+    try {
+        const saved = await saveBaibaokuFastConfig({ progressiveChatLoadingEnabled: next });
+        const savedEnabled = saved.progressiveChatLoadingEnabled !== false;
+        settings.progressiveChatLoadingEnabled = savedEnabled;
+        applyFastChatGetOptimization();
+        return saved;
+    } catch (error) {
+        settings.progressiveChatLoadingEnabled = previous;
+        applyFastChatGetOptimization();
+        throw error;
+    }
+}
+
 async function setBaibaokuTokenizerBulkCountEnabled(enabled) {
     const next = Boolean(enabled);
     const previous = settings.tokenizerBulkCountEnabled !== false;
@@ -493,10 +541,12 @@ function saveExtensionSettings() {
     delete persistedSettings.baibaokuSettingsAccelerationEnabled;
     delete persistedSettings.fastCharacterListEnabled;
     delete persistedSettings.recentChatListAccelerationEnabled;
+    delete persistedSettings.progressiveChatLoadingEnabled;
     Object.assign(extension_settings[SETTINGS_KEY], persistedSettings);
     delete extension_settings[SETTINGS_KEY].baibaokuSettingsAccelerationEnabled;
     delete extension_settings[SETTINGS_KEY].fastCharacterListEnabled;
     delete extension_settings[SETTINGS_KEY].recentChatListAccelerationEnabled;
+    delete extension_settings[SETTINGS_KEY].progressiveChatLoadingEnabled;
     saveSettingsDebounced();
 }
 
@@ -2040,7 +2090,7 @@ async function renderSettingsPanel() {
                 checkbox.prop('checked', settings.baibaokuSettingsAccelerationEnabled !== false);
             } finally {
                 checkbox.prop('disabled', false);
-                refreshBaibaokuPanelStatus(container);
+                applyBaibaokuPanelLocalState(container);
             }
         });
 
@@ -2056,7 +2106,7 @@ async function renderSettingsPanel() {
                 checkbox.prop('checked', settings.fastCharacterListEnabled !== false);
             } finally {
                 checkbox.prop('disabled', false);
-                refreshBaibaokuPanelStatus(container);
+                applyBaibaokuPanelLocalState(container);
             }
         });
 
@@ -2072,7 +2122,23 @@ async function renderSettingsPanel() {
                 checkbox.prop('checked', settings.recentChatListAccelerationEnabled !== false);
             } finally {
                 checkbox.prop('disabled', false);
-                refreshBaibaokuPanelStatus(container);
+                applyBaibaokuPanelLocalState(container);
+            }
+        });
+
+    $('#bai_bai_toolkit_progressive_chat_loading_enabled')
+        .prop('checked', settings.progressiveChatLoadingEnabled)
+        .on('input', async function () {
+            const checkbox = $(this);
+            checkbox.prop('disabled', true);
+            try {
+                await setBaibaokuProgressiveChatLoadingEnabled(Boolean(checkbox.prop('checked')));
+            } catch (error) {
+                console.debug(`${LOG_PREFIX} Failed to save BaiBaoKu progressive chat loading config`, error);
+                checkbox.prop('checked', settings.progressiveChatLoadingEnabled === true);
+            } finally {
+                checkbox.prop('disabled', false);
+                applyBaibaokuPanelLocalState(container);
             }
         });
 
@@ -2088,7 +2154,7 @@ async function renderSettingsPanel() {
                 checkbox.prop('checked', settings.tokenizerBulkCountEnabled !== false);
             } finally {
                 checkbox.prop('disabled', false);
-                refreshBaibaokuPanelStatus(container);
+                applyBaibaokuPanelLocalState(container);
             }
         });
 
@@ -2152,19 +2218,96 @@ function initializeBaibaokuPanel(container) {
     container.find('#bai_bai_toolkit_baibaoku_refresh_status')
         .off('click.baiBaiToolkitBaibaokuStatus')
         .on('click.baiBaiToolkitBaibaokuStatus', () => {
-            refreshBaibaokuPanelStatus(container);
+            refreshBaibaokuPanelStatus(container, { force: true });
         });
 
     refreshBaibaokuPanelStatus(container);
 }
 
-async function refreshBaibaokuPanelStatus(container) {
+function getBaibaokuPanelState() {
+    if (!extensionState.baibaokuPanel || typeof extensionState.baibaokuPanel !== 'object') {
+        extensionState.baibaokuPanel = {
+            cache: null,
+            pending: null,
+        };
+    }
+
+    return extensionState.baibaokuPanel;
+}
+
+function applyBaibaokuPanelLocalState(container) {
+    const bridge = getBaibaokuEarlyBridge();
+    const bridgeStatus = container.find('#bai_bai_toolkit_baibaoku_bridge_status');
+
+    const bridgeLabel = bridge?.installed
+        ? `已注入${bridge.version ? ` v${bridge.version}` : ''}`
+        : '未注入';
+    updateBaibaokuStatusText(bridgeStatus, bridgeLabel, Boolean(bridge?.installed));
+
+    container.find('#bai_bai_toolkit_baibaoku_settings_acceleration_enabled')
+        .prop('checked', settings.baibaokuSettingsAccelerationEnabled !== false);
+    container.find('#bai_bai_toolkit_fast_character_list_enabled')
+        .prop('checked', settings.fastCharacterListEnabled !== false);
+    container.find('#bai_bai_toolkit_recent_chat_list_acceleration_enabled')
+        .prop('checked', settings.recentChatListAccelerationEnabled !== false);
+    container.find('#bai_bai_toolkit_progressive_chat_loading_enabled')
+        .prop('checked', settings.progressiveChatLoadingEnabled !== false);
+    container.find('#bai_bai_toolkit_tokenizer_bulk_count_enabled')
+        .prop('checked', settings.tokenizerBulkCountEnabled !== false);
+
+    applyCachedBaibaokuPanelStatus(container, getBaibaokuPanelState().cache);
+}
+
+function applyCachedBaibaokuPanelStatus(container, cache) {
+    if (!cache) {
+        return false;
+    }
+
+    const serverStatus = container.find('#bai_bai_toolkit_baibaoku_server_status');
+    const driverStatus = container.find('#bai_bai_toolkit_baibaoku_driver_status');
+    const status = cache.status;
+    const driver = status?.driver;
+
+    if (status) {
+        updateBaibaokuStatusText(serverStatus, `已连接${status?.version ? ` v${status.version}` : ''}`, true);
+        updateBaibaokuStatusText(driverStatus, driver?.available
+            ? `可用${driver.package ? ` (${driver.package})` : ''}`
+            : '不可用', Boolean(driver?.available));
+        return true;
+    }
+
+    if (cache.offline) {
+        updateBaibaokuStatusText(serverStatus, '未连接', false);
+        updateBaibaokuStatusText(driverStatus, '未知', false);
+        return true;
+    }
+
+    return false;
+}
+
+async function refreshBaibaokuPanelStatus(container, { force = false } = {}) {
+    const panelState = getBaibaokuPanelState();
+    const cache = panelState.cache;
+    const cacheFresh = cache && Date.now() - Number(cache.updatedAt || 0) < BAIBAOKU_PANEL_STATUS_CACHE_MS;
+    let refreshed = false;
+    applyBaibaokuPanelLocalState(container);
+    if (!force && cacheFresh && applyCachedBaibaokuPanelStatus(container, cache)) {
+        return;
+    }
+
+    if (!force && panelState.pending) {
+        await panelState.pending.catch(() => null);
+        applyCachedBaibaokuPanelStatus(container, panelState.cache);
+        return;
+    }
+
     const serverStatus = container.find('#bai_bai_toolkit_baibaoku_server_status');
     const driverStatus = container.find('#bai_bai_toolkit_baibaoku_driver_status');
     const bridgeStatus = container.find('#bai_bai_toolkit_baibaoku_bridge_status');
     const accelerationToggle = container.find('#bai_bai_toolkit_baibaoku_settings_acceleration_enabled');
     const characterListToggle = container.find('#bai_bai_toolkit_fast_character_list_enabled');
     const recentChatListToggle = container.find('#bai_bai_toolkit_recent_chat_list_acceleration_enabled');
+    const progressiveChatLoadingToggle = container.find('#bai_bai_toolkit_progressive_chat_loading_enabled');
     const tokenizerBulkCountToggle = container.find('#bai_bai_toolkit_tokenizer_bulk_count_enabled');
     const bridge = getBaibaokuEarlyBridge();
 
@@ -2210,6 +2353,13 @@ async function refreshBaibaokuPanelStatus(container) {
     try {
         const status = await fetchBaibaokuStatus();
         const driver = status?.driver;
+        panelState.cache = {
+            ...(panelState.cache || {}),
+            status,
+            offline: false,
+            updatedAt: Date.now(),
+        };
+        refreshed = true;
         updateBaibaokuStatusText(serverStatus, `已连接${status?.version ? ` v${status.version}` : ''}`, true);
         updateBaibaokuStatusText(driverStatus, driver?.available
             ? `可用${driver.package ? ` (${driver.package})` : ''}`
@@ -2220,15 +2370,25 @@ async function refreshBaibaokuPanelStatus(container) {
             const settingsEnabled = config.settingsAccelerationEnabled !== false;
             const characterListEnabled = config.characterListAccelerationEnabled !== false;
             const recentChatListEnabled = config.recentChatListAccelerationEnabled !== false;
+            const progressiveChatLoadingEnabled = config.progressiveChatLoadingEnabled !== false;
             const tokenizerBulkCountEnabled = config.tokenizerBulkCountEnabled !== false;
+            panelState.cache = {
+                ...(panelState.cache || {}),
+                config,
+                offline: false,
+                updatedAt: Date.now(),
+            };
             settings.baibaokuSettingsAccelerationEnabled = settingsEnabled;
             settings.fastCharacterListEnabled = characterListEnabled;
             settings.recentChatListAccelerationEnabled = recentChatListEnabled;
+            settings.progressiveChatLoadingEnabled = progressiveChatLoadingEnabled;
             settings.tokenizerBulkCountEnabled = tokenizerBulkCountEnabled;
             accelerationToggle.prop('checked', settingsEnabled);
             characterListToggle.prop('checked', characterListEnabled);
             recentChatListToggle.prop('checked', recentChatListEnabled);
+            progressiveChatLoadingToggle.prop('checked', progressiveChatLoadingEnabled);
             tokenizerBulkCountToggle.prop('checked', tokenizerBulkCountEnabled);
+            applyFastChatGetOptimization();
             if (typeof bridge?.setSettingsAccelerationEnabled === 'function') {
                 bridge.setSettingsAccelerationEnabled(settingsEnabled);
             } else if (bridge) {
@@ -2255,6 +2415,14 @@ async function refreshBaibaokuPanelStatus(container) {
     } catch {
         updateBaibaokuStatusText(serverStatus, '未连接', false);
         updateBaibaokuStatusText(driverStatus, '未知', false);
+    }
+    if (!refreshed) {
+        panelState.cache = {
+            ...(panelState.cache || {}),
+            status: null,
+            offline: true,
+            updatedAt: Date.now(),
+        };
     }
 }
 
@@ -2396,6 +2564,7 @@ function applyFeatureSettings() {
     applyWorldInfoCharacterFilterOptionsOptimization();
     applyCharacterSearchInputOptimization();
     applyCharacterListAvatarLazyLoadOptimization();
+    applyFastChatGetOptimization();
     applyDescriptionCodeMirrorEditorOptimization();
     applyCustomCssInputOptimization();
     presetOptimizations.applyPresetScrollOptimization();
@@ -9274,6 +9443,518 @@ function isPowerUserResizeHandler(handler) {
     return source.includes('adjustAutocompleteDebounced')
         && source.includes('setHotswapsDebounced')
         && source.includes('power_user.movingUIState');
+}
+
+function applyFastChatGetOptimization() {
+    const hook = installFastChatGetFetchHook();
+    if (hook) {
+        hook.isEnabled = () => settings.progressiveChatLoadingEnabled === true;
+    }
+
+    installFastChatGetInteractionGuard();
+}
+
+function getFastChatGetState() {
+    if (!extensionState.fastChatGet || typeof extensionState.fastChatGet !== 'object') {
+        extensionState.fastChatGet = {
+            requestId: 0,
+            current: null,
+            lastNoticeAt: 0,
+        };
+    }
+
+    return extensionState.fastChatGet;
+}
+
+function installFastChatGetInteractionGuard() {
+    const state = getFastChatGetState();
+    if (state.interactionGuardInstalled) {
+        return;
+    }
+
+    state.interactionGuardInstalled = true;
+
+    document.addEventListener('click', (event) => {
+        if (!isFastChatGetHydrating()) {
+            return;
+        }
+
+        const target = event.target instanceof Element
+            ? event.target.closest(FAST_CHAT_GET_ACTION_SELECTOR)
+            : null;
+        const messageMultiClick = event.target instanceof Element
+            && event.detail >= 2
+            && Boolean(event.target.closest('#chat .mes[mesid]'));
+
+        if (!target && !messageMultiClick) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        notifyFastChatGetBlocked();
+    }, true);
+
+    document.addEventListener('keydown', (event) => {
+        if (!isFastChatGetHydrating()) {
+            return;
+        }
+
+        const target = event.target;
+        const isSendEnter = target instanceof HTMLElement
+            && target.id === 'send_textarea'
+            && event.key === 'Enter'
+            && (event.ctrlKey || event.metaKey || !event.shiftKey);
+
+        if (!isSendEnter) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        notifyFastChatGetBlocked();
+    }, true);
+}
+
+function isFastChatGetHydrating() {
+    const current = getFastChatGetState().current;
+    return settings.progressiveChatLoadingEnabled === true
+        && Boolean(current?.loadingFull);
+}
+
+function notifyFastChatGetBlocked() {
+    const state = getFastChatGetState();
+    const now = Date.now();
+    if (now - Number(state.lastNoticeAt || 0) < 1500) {
+        return;
+    }
+
+    state.lastNoticeAt = now;
+    if (globalThis.toastr?.info) {
+        globalThis.toastr.info('聊天记录正在补全，请稍候再操作。', '柏宝库');
+    }
+}
+
+function installFastChatGetFetchHook() {
+    const existing = globalThis[FAST_CHAT_GET_FETCH_KEY];
+    if (existing?.wrappedFetch) {
+        return existing;
+    }
+
+    const originalFetch = globalThis.fetch;
+
+    if (typeof originalFetch !== 'function') {
+        return null;
+    }
+
+    const state = {
+        originalFetch: originalFetch.bind(globalThis),
+        wrappedFetch: null,
+        isEnabled: () => settings.progressiveChatLoadingEnabled === true,
+    };
+
+    state.wrappedFetch = async function baiBaiToolkitFastChatGetFetch(input, init) {
+        try {
+            if (isFastChatGetSaveRequest(input, init) && isFastChatGetHydrating()) {
+                notifyFastChatGetBlocked();
+                return buildFastChatGetBlockedResponse();
+            }
+
+            if (!state.isEnabled()) {
+                return state.originalFetch(input, init);
+            }
+
+            const requestInfo = await getFastChatGetRequestInfo(input, init);
+            if (!requestInfo) {
+                return state.originalFetch(input, init);
+            }
+
+            return await fetchFastChatInitial(state.originalFetch, requestInfo, input, init);
+        } catch (error) {
+            console.debug(`${LOG_PREFIX} Fast chat get path failed; falling back to native chat get`, error);
+            return state.originalFetch(input, init);
+        }
+    };
+
+    state.wrappedFetch[FAST_CHAT_GET_FETCH_KEY] = true;
+    globalThis[FAST_CHAT_GET_FETCH_KEY] = state;
+    globalThis.fetch = state.wrappedFetch;
+    return state;
+}
+
+function isFastChatGetSaveRequest(input, init) {
+    const rawUrl = getFetchRequestUrl(input);
+    if (!rawUrl || getFetchRequestMethod(input, init) !== 'POST') {
+        return false;
+    }
+
+    try {
+        const url = new URL(rawUrl, location.href);
+        return url.origin === location.origin && FAST_CHAT_GET_SAVE_PATHS.has(url.pathname);
+    } catch {
+        return false;
+    }
+}
+
+async function getFastChatGetRequestInfo(input, init) {
+    const rawUrl = getFetchRequestUrl(input);
+
+    if (!rawUrl || getFetchRequestMethod(input, init) !== 'POST') {
+        return null;
+    }
+
+    let url;
+    try {
+        url = new URL(rawUrl, location.href);
+    } catch {
+        return null;
+    }
+
+    if (url.origin !== location.origin || !FAST_CHAT_GET_PATHS.has(url.pathname)) {
+        return null;
+    }
+
+    const body = await readFetchJsonBody(input, init);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return null;
+    }
+
+    return {
+        path: url.pathname,
+        body,
+    };
+}
+
+async function fetchFastChatInitial(fetchFn, requestInfo, input, init) {
+    const response = await fetchFastChatPayload(fetchFn, input, init, {
+        source: requestInfo.path,
+        mode: 'initial',
+        originalRequest: requestInfo.body,
+        thresholdBytes: FAST_CHAT_GET_DEFAULT_THRESHOLD_BYTES,
+        initialMessages: getFastChatInitialMessageCount(),
+    });
+
+    const data = normalizeFastChatGetPayload(response);
+    if (!Array.isArray(data.chat)) {
+        throw new Error('BaiBaoKu fast chat get returned a non-array chat payload');
+    }
+
+    if (data.kind === 'partial' || data.meta?.partial === true) {
+        beginFastChatHydration(fetchFn, requestInfo, input, init, data);
+    } else {
+        clearFastChatHydration();
+    }
+
+    return buildFastChatGetArrayResponse(data.chat);
+}
+
+async function fetchFastChatPayload(fetchFn, input, init, payload) {
+    const headers = buildFetchHeaders(input, init);
+    const requestHeaders = getRequestHeaders();
+    for (const [key, value] of Object.entries(requestHeaders || {})) {
+        if (!headers.has(key)) {
+            headers.set(key, value);
+        }
+    }
+    headers.set('Content-Type', 'application/json');
+
+    const fastInit = {
+        ...copyFetchRequestOptions(input, init),
+        method: 'POST',
+        headers,
+        cache: 'no-store',
+        body: JSON.stringify(payload),
+    };
+
+    const response = await fetchFn(BAIBAOKU_FAST_CHAT_GET_URL, fastInit);
+    const json = await response.clone().json().catch(() => null);
+    if (!response?.ok || !json) {
+        throw new Error(`Unexpected status ${response?.status || 'unknown'}`);
+    }
+
+    const data = json?.data && typeof json.data === 'object' ? json.data : json;
+    if (json?.ok === false || data?.ok === false) {
+        throw new Error(json?.message || json?.error?.message || data?.message || data?.error?.message || 'BaiBaoKu fast chat get failed');
+    }
+
+    return data;
+}
+
+function normalizeFastChatGetPayload(data) {
+    if (!data || typeof data !== 'object') {
+        throw new Error('BaiBaoKu fast chat get returned an invalid payload');
+    }
+
+    return {
+        kind: String(data.kind || (data.meta?.partial ? 'partial' : 'complete')),
+        chat: data.chat,
+        meta: data.meta && typeof data.meta === 'object' ? data.meta : {},
+    };
+}
+
+function beginFastChatHydration(fetchFn, requestInfo, input, init, data) {
+    const state = getFastChatGetState();
+    const meta = data.meta || {};
+    const hydration = {
+        requestId: Number(state.requestId || 0) + 1,
+        loadingFull: true,
+        source: requestInfo.path,
+        originalRequest: requestInfo.body,
+        chatKey: String(meta.chatKey || ''),
+        version: String(meta.version || ''),
+        messageStartIndex: Math.max(0, Number(meta.messageStartIndex || 0)),
+        returnedMessages: Math.max(0, Number(meta.returnedMessages || getChatMessagesFromResponseChat(data.chat).length || 0)),
+        currentChatId: getCurrentChatId?.() ?? '',
+        startedAt: Date.now(),
+    };
+
+    state.requestId = hydration.requestId;
+    state.current = hydration;
+    document.body?.classList.add('bai-bai-toolkit-fast-chat-hydrating');
+
+    void hydrateFastChatInBackground(fetchFn, input, init, hydration)
+        .catch((error) => {
+            console.warn(`${LOG_PREFIX} Fast chat hydration failed`, error);
+            if (getFastChatGetState().current?.requestId === hydration.requestId && globalThis.toastr?.error) {
+                globalThis.toastr.error('聊天记录补全失败，请重新进入当前聊天。', '柏宝库');
+            }
+        });
+}
+
+async function hydrateFastChatInBackground(fetchFn, input, init, hydration) {
+    const payload = {
+        source: hydration.source,
+        mode: 'full',
+        originalRequest: hydration.originalRequest,
+        chatKey: hydration.chatKey,
+        version: hydration.version,
+    };
+
+    let data;
+    try {
+        data = normalizeFastChatGetPayload(await fetchFastChatPayload(fetchFn, input, init, payload));
+    } catch (error) {
+        console.debug(`${LOG_PREFIX} BaiBaoKu full chat get failed; trying native chat get`, error);
+        data = {
+            kind: 'full',
+            chat: await fetchNativeFullChat(fetchFn, hydration),
+            meta: {
+                chatKey: hydration.chatKey,
+                version: hydration.version,
+            },
+        };
+    }
+
+    if (!isCurrentFastChatHydration(hydration, data.meta)) {
+        if (getFastChatGetState().current?.requestId === hydration.requestId) {
+            clearFastChatHydration(hydration.requestId);
+            if (globalThis.toastr?.warning) {
+                globalThis.toastr.warning('聊天记录补全状态已过期，请重新进入当前聊天。', '柏宝库');
+            }
+        }
+        return;
+    }
+
+    completeFastChatHydration(hydration, data);
+}
+
+async function fetchNativeFullChat(fetchFn, hydration) {
+    const headers = new Headers(getRequestHeaders());
+    if (!headers.has('Content-Type')) {
+        headers.set('Content-Type', 'application/json');
+    }
+
+    const response = await fetchFn(hydration.source, {
+        method: 'POST',
+        headers,
+        cache: 'no-store',
+        body: JSON.stringify(hydration.originalRequest || {}),
+    });
+    const data = await response.clone().json().catch(() => null);
+    if (!response?.ok || !Array.isArray(data)) {
+        throw new Error(`Native chat get returned ${response?.status || 'invalid data'}`);
+    }
+
+    return data;
+}
+
+function isCurrentFastChatHydration(hydration, meta = {}) {
+    const current = getFastChatGetState().current;
+    if (!current || current.requestId !== hydration.requestId || !current.loadingFull) {
+        return false;
+    }
+
+    if (hydration.chatKey && meta?.chatKey && String(meta.chatKey) !== hydration.chatKey) {
+        return false;
+    }
+
+    if (hydration.version && meta?.version && String(meta.version) !== hydration.version) {
+        return false;
+    }
+
+    const currentChatId = getCurrentChatId?.() ?? '';
+    return String(currentChatId) === String(hydration.currentChatId);
+}
+
+function completeFastChatHydration(hydration, data) {
+    const messages = getChatMessagesFromResponseChat(data.chat);
+    if (!messages.length && Array.isArray(data.chat) && data.chat.length > 0) {
+        throw new Error('Full chat payload did not contain messages');
+    }
+
+    const chatArray = Array.isArray(scriptModule.chat) ? scriptModule.chat : null;
+    if (!chatArray) {
+        throw new Error('SillyTavern chat array is unavailable');
+    }
+
+    const chatElement = document.querySelector('#chat');
+    const scrollSnapshot = getFastChatScrollSnapshot(chatElement);
+
+    chatArray.splice(0, chatArray.length, ...messages);
+    scheduleFastChatDomCorrection(hydration);
+    syncFastChatShowMoreButton(messages.length);
+    emitFastChatHydratedEvents();
+    restoreFastChatScrollSnapshot(chatElement, scrollSnapshot);
+    clearFastChatHydration(hydration.requestId);
+
+    console.debug(`${LOG_PREFIX} Fast chat hydration completed`, {
+        messages: messages.length,
+        start: hydration.messageStartIndex,
+        returned: hydration.returnedMessages,
+    });
+}
+
+function getChatMessagesFromResponseChat(chat) {
+    if (!Array.isArray(chat)) {
+        return [];
+    }
+
+    if (chat[0]?.chat_metadata) {
+        return chat.slice(1);
+    }
+
+    return chat;
+}
+
+function correctFastChatDomMessageIds(hydration) {
+    const messages = [...document.querySelectorAll('#chat .mes[mesid]')]
+        .filter(element => element instanceof HTMLElement);
+
+    messages.forEach((element, index) => {
+        const realId = hydration.messageStartIndex + index;
+        element.setAttribute('mesid', String(realId));
+        element.dataset.mesid = String(realId);
+        element.dataset.messageId = String(realId);
+
+        const display = element.querySelector('.mesIDDisplay');
+        if (display instanceof HTMLElement) {
+            display.textContent = `#${realId}`;
+        }
+    });
+}
+
+function scheduleFastChatDomCorrection(hydration) {
+    correctFastChatDomMessageIds(hydration);
+    requestAnimationFrame(() => correctFastChatDomMessageIds(hydration));
+    setTimeout(() => correctFastChatDomMessageIds(hydration), 100);
+    setTimeout(() => correctFastChatDomMessageIds(hydration), 500);
+}
+
+function syncFastChatShowMoreButton(fullMessageCount) {
+    const button = document.querySelector('#show_more_messages');
+    if (!(button instanceof HTMLElement)) {
+        return;
+    }
+
+    const renderedMessages = document.querySelectorAll('#chat .mes[mesid]').length;
+    if (renderedMessages <= 0 || renderedMessages >= fullMessageCount) {
+        return;
+    }
+
+    button.classList.remove('disabled', 'displayNone', 'hidden');
+    button.removeAttribute('disabled');
+    button.removeAttribute('aria-disabled');
+    button.style.display = '';
+}
+
+function emitFastChatHydratedEvents() {
+    try {
+        if (event_types.MORE_MESSAGES_LOADED) {
+            eventSource.emit(event_types.MORE_MESSAGES_LOADED);
+        }
+        if (event_types.CHAT_LOADED) {
+            eventSource.emit(event_types.CHAT_LOADED);
+        }
+    } catch (error) {
+        console.debug(`${LOG_PREFIX} Failed to emit fast chat hydration events`, error);
+    }
+}
+
+function clearFastChatHydration(requestId = null) {
+    const state = getFastChatGetState();
+    if (requestId !== null && state.current?.requestId !== requestId) {
+        return;
+    }
+
+    state.current = null;
+    document.body?.classList.remove('bai-bai-toolkit-fast-chat-hydrating');
+}
+
+function getFastChatInitialMessageCount() {
+    const truncation = Number(power_user?.chat_truncation);
+    if (Number.isInteger(truncation) && truncation > 0) {
+        return truncation;
+    }
+
+    return FAST_CHAT_GET_DEFAULT_INITIAL_MESSAGES;
+}
+
+function buildFastChatGetArrayResponse(chat) {
+    return new Response(JSON.stringify(chat), {
+        status: 200,
+        statusText: 'OK',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+}
+
+function buildFastChatGetBlockedResponse() {
+    return new Response(JSON.stringify({
+        error: true,
+        message: 'Chat is still hydrating. Please wait for the full chat to load.',
+    }), {
+        status: 409,
+        statusText: 'Conflict',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+}
+
+function getFastChatScrollSnapshot(chatElement) {
+    if (!(chatElement instanceof HTMLElement)) {
+        return null;
+    }
+
+    return {
+        top: chatElement.scrollTop,
+        height: chatElement.scrollHeight,
+    };
+}
+
+function restoreFastChatScrollSnapshot(chatElement, snapshot) {
+    if (!(chatElement instanceof HTMLElement) || !snapshot) {
+        return;
+    }
+
+    const restore = () => {
+        const delta = chatElement.scrollHeight - snapshot.height;
+        chatElement.scrollTop = Math.max(0, snapshot.top + delta);
+    };
+
+    restore();
+    requestAnimationFrame(restore);
 }
 
 function disableFastSettingsBootstrapFetchHook() {
