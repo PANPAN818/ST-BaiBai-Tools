@@ -1,79 +1,177 @@
 # 柏宝箱
 
-This extension packages a small set of SillyTavern responsiveness fixes as a third-party extension.
+柏宝箱是一个 SillyTavern 第三方扩展，主要用来缓解移动端、长聊天、海量角色/正则/预设场景下的卡顿。它会在不改变 SillyTavern 原有使用方式的前提下，接管部分高开销的列表渲染、接口请求、编辑器和滚动行为。
 
-Current version: `0.23.0`
+当前版本：`0.24.0`
 
-What it does:
+## 功能总览
 
-- Guards `AutoComplete` reposition work so inactive instances do not recompute layout on every mobile `resize`
-- Replaces the stock `power-user` window `resize` handler with a version that exits early on mobile before expensive autocomplete and hotswap refresh work runs
-- Speeds up opening the chat file manager for normal character chats by rendering a lightweight file-name list first, then using one full metadata request to fill in file size, message count, date, and preview text
-- Opens normal character recent chats from the welcome page directly to the clicked chat file, avoiding an intermediate render of the character's previously active chat
-- Skips unnecessary translation extension work on message update events when automatic translation is disabled and the message has no translated display cache, avoiding repeated full-chat saves in long chats
-- Optimizes long-chat DOM rendering by auto-scrolling to the bottom after chat load, applying `content-visibility` to visible message floors when the current DOM text volume is high, caching placeholder heights, and using a temporary bottom anchor while the initial bottom scroll settles
-- Speeds up opening and closing World Info entry editors by skipping the expensive height animation for top-level entry drawers, keeping initialized editors alive while collapsed, and lazily initializing heavier Select2 controls and character filter options
-- Lazily loads character list, persona list, and welcome-page recent-chat thumbnails by holding off-screen `/thumbnail` URLs in `data-*` until the card scrolls near the visible area, with `content-visibility` applied to those rows
-- Speeds up OpenAI preset switching by letting the mobile preset select close first, rendering the prompt list immediately, suppressing the stock one-second delayed rebuild for that switch, and refreshing token counts afterward
-- Replaces prompt preset dragging with a non-reflow drag preview that moves a floating clone, shows an insertion line, and only reorders the list when dropped
-- Speeds up prompt preset toggles and saves by updating only the affected prompt row immediately, then refreshing token counts after a short debounce instead of rebuilding the whole prompt list on every click
-- Replaces the regex script lists with a Vue-powered grouped manager that speeds up row operations, drag sorting, grouping, and bulk actions without rebuilding every regex list
-- Adds a `预设内容 CodeMirror 编辑器` switch that replaces the OpenAI prompt entry content textarea, including SillyTavern's expanded editor, while keeping the original form fields synchronized for saves
-- Optionally saves the current OpenAI preset after a prompt entry edit is saved; this switch is off by default
-- Allows either double or triple clicking on a message text bubble to quickly open the message editor for that message floor
-- Allows the message editor to open immediately after deleting messages with SillyTavern's delete-message mode, and submits that fast-opened edit before replaying common generation actions
-- Prevents mobile auto-focus from opening the keyboard when entering message edit mode, opening the chat file manager, entering a character chat, or when SillyTavern automatically refocuses the chat input while preserving manual input focus
-- Suppresses chat scroll compensation caused by mobile keyboard layout resize while editing messages
-- Adds a separate `切换美化优化` (Custom CSS Shadow Property) switch that completely intercepts native `#customCSS` writes and redirects them to a virtual JavaScript memory property, physically preventing browser reflow and repaint freezes caused by large CSS string assignments during theme switches
-- Adds a separate `自定义CSS CodeMirror 编辑器` switch that replaces the visible `#customCSS` textarea and SillyTavern's expanded custom-CSS editor with CodeMirror, applies the stylesheet after editing, avoids native textarea and stylesheet work during IME composition, and gives CSS punctuation theme-aware highlighting
-- Adds an experimental CodeMirror 6 role-description editor mode that replaces the visible long textarea with a lightweight editor and restores SillyTavern's original textarea if CodeMirror cannot be loaded
-- Adds a SillyTavern extension settings panel with separate switches for the responsiveness, chat file manager, and prompt preset features
+- 移动端输入框、自动补全和聊天编辑时的响应优化
+- 长聊天 DOM 渲染优化，减少屏幕外楼层的布局和绘制开销
+- 管理聊天文件弹窗请求加速、滚动优化和关闭清理
+- 主页最近聊天直达目标聊天，避免先渲染角色上一次聊天
+- 角色列表、Persona 列表和欢迎页最近聊天头像缩略图懒加载
+- 角色搜索输入框拼音输入优化，减少中文输入法导致的频繁搜索和重绘
+- OpenAI 预设切换、拖拽、开关、保存和 Token 统计刷新优化
+- 预设内容、自定义 CSS、角色描述的 CodeMirror 编辑器优化
+- 正则列表 Vue 分组管理器，支持分组、拖拽、批量移动和延迟保存
+- 世界书条目快速展开，减少抽屉动画和 Select2 初始化带来的卡顿
+- 自定义 CSS Shadow Property，缓解切换美化/主题时的大段 CSS 写入卡顿
+- 翻译更新事件保存优化，避免自动翻译关闭时的无效长聊天保存
+- 聊天保存请求 Gzip 压缩，公网访问时减少保存请求体积
+- 柏宝库分页/加速：Settings、角色列表、最近聊天、进入聊天分批获取、Tokenizer 批量计数
 
-The chat file manager optimization only applies when:
+## 聊天优化
 
-- the request is for `/api/chats/search`
-- the search query is empty
-- the current target is a normal character chat, not a group chat
+### 长聊天渲染优化
 
-Keyword searches and group chats fall back to SillyTavern's original `/api/chats/search` behavior.
+启用 `长聊天渲染优化` 后，扩展会在当前聊天楼层文本量较大时为消息楼层应用 `content-visibility` 和高度占位缓存，减少屏幕外楼层参与布局和绘制。进入聊天后会自动滚到底部，并用临时底部锚点处理初始加载期间的高度变化。
 
-The prompt preset switch optimization only applies to the OpenAI/chat-completion prompt manager. It applies prompt list fields before the rest of the preset switch finishes so the list can repaint earlier. Its fast renderer uses indexed prompt lookups and delegated row actions to avoid repeated per-row searches and listener binding. When deleting the selected OpenAI preset, it selects the next preset in the list, or the first preset when deleting the last one. It preserves SillyTavern's original behavior when disabled.
+生成新消息或更新楼层时，扩展会尽量保持底部或最新楼层位置稳定，避免长聊天中常见的跳动、滚不到底和反复重排。
 
-The prompt preset drag optimization only applies to the OpenAI/chat-completion prompt manager list. It is enabled by default. When enabled, it bypasses the stock jQuery UI sortable behavior so nearby prompt rows do not move out of the way while dragging. The original row keeps its layout slot, a floating clone follows the pointer, an insertion line previews the drop target, and the prompt order is saved only after dropping. On mobile, prompt rows use long press to start dragging, while normal scrolling cancels the pending drag. A separate mobile switch controls whether the whole row can start a drag; this mobile whole-row switch is disabled by default, so only the left drag handle starts mobile dragging unless enabled. The feature switch restores SillyTavern's original sortable behavior when disabled.
+### 管理聊天文件优化
 
-The prompt preset quick-operation optimization only applies to existing rows in the OpenAI/chat-completion prompt manager list. New prompt creation still falls back to SillyTavern's original behavior because it changes the available prompt list. The feature switch preserves SillyTavern's original behavior when disabled.
+`管理聊天文件请求加速` 只在普通角色聊天、空搜索、请求 `/api/chats/search` 时生效。扩展会先用轻量文件名列表渲染弹窗，再异步补齐文件大小、消息数、日期和预览文本。
 
-### 正则优化列表 (Regex Optimization List)
+`管理聊天文件滚动优化` 会对聊天文件行启用绘制隔离，缓解大量聊天文件时的滚动卡顿。
 
-启用 `正则快速操作` 后，正则列表会使用扩展内置的 Vue 管理器接管全局、预设和角色正则列表，主要优化包括：
+`管理聊天文件关闭清理` 会在管理聊天文件窗口关闭后清空已生成的聊天文件 DOM，减少关闭后的页面负担。
 
-- 单条正则启用/禁用、编辑保存、删除时只更新受影响条目，避免立即重建全部正则列表
-- 正则条目支持拖拽排序和跨分组移动，并保存新的顺序与分组归属
+关键词搜索和群聊会自动回退到 SillyTavern 原始逻辑。
+
+### 主页进入聊天优化
+
+启用 `主页进入聊天优化` 后，从欢迎页最近聊天进入普通角色聊天时，会直接打开被点击的聊天文件，避免先渲染角色上一次激活的聊天再切换到目标文件。
+
+### 删楼后快速编辑
+
+启用 `删楼后快速编辑` 后，通过 SillyTavern 删除消息模式删楼后，可以立即打开上一层编辑区。若此时点击发送、继续、冒充或重新生成，扩展会先提交当前快速打开的编辑区，再继续执行原动作。
+
+### 移动端输入与滚动
+
+- `输入框响应优化`：减少移动端 resize 触发的自动补全和 hotswap 重算。
+- `禁止输入法自动弹出`：进入聊天、打开聊天文件管理、进入楼层编辑时拦截程序自动聚焦，手动点击输入框仍然可用。
+- `编辑楼层时禁用自动滚动`：抑制移动端键盘挤压布局造成的聊天区滚动补偿。
+- `双击编辑楼层` / `三击编辑楼层`：快速打开消息编辑器，两个开关互斥。
+
+### 聊天保存请求 Gzip 压缩
+
+启用 `聊天保存请求 Gzip 压缩` 后，扩展会对公网访问下的 `/api/chats/save` 和 `/api/chats/group/save` 请求体进行 Gzip 压缩。本地地址和局域网地址会自动跳过；如果压缩请求失败，会自动用未压缩请求重试。
+
+## 角色与头像优化
+
+### 头像缩略图懒加载
+
+启用 `头像缩略图懒加载` 后，角色列表、Persona 列表和欢迎页最近聊天会先用占位图渲染离屏头像，把真实 `/thumbnail` 地址暂存到 `data-*` 上。头像滚动到可视区域附近后再加载真实缩略图。
+
+同时会给角色行、Persona 行和最近聊天行应用 `content-visibility`，并为图片设置 `loading="lazy"`、`decoding="async"` 和低优先级加载。浏览器不支持 `IntersectionObserver` 时，会自动退回原生懒加载提示。
+
+### 角色搜索输入框优化
+
+启用 `角色搜索输入框优化` 后，扩展会在事件捕获阶段拦截角色搜索输入框的输入事件。中文拼音输入组合期间不会触发搜索，组合结束后再执行一次搜索，并额外加入 300ms 防抖，减少海量角色下的输入卡顿和 DOM 重绘。
+
+## 预设优化
+
+### 切换预设快速刷新
+
+启用 `切换预设快速刷新` 后，OpenAI / Chat Completion 预设切换时会先让移动端下拉框收起，再尽早渲染 prompt 列表，并把 Token 统计刷新放到列表显示之后执行。删除当前预设时，会自动选择下一项，删除最后一项时选择第一项。
+
+### 预设条目拖拽优化
+
+启用 `预设条目拖拽优化` 后，扩展会绕过原生 jQuery UI sortable 的实时挤压布局。拖拽时原条目保留占位，浮动克隆跟随指针，只显示插入线，松手后再保存顺序。
+
+移动端默认只允许长按左侧拖拽手柄；启用 `手机预设条目整条拖拽` 后，可以长按整条非按钮区域开始拖拽。正常滚动会取消待开始的拖拽，减少误触。
+
+### 预设快速操作
+
+启用 `预设快速操作` 后，已有 prompt 条目的启用/禁用和保存只更新当前行，并延迟刷新 Token 统计，避免每次操作都重建整份列表。新建 prompt 仍使用 SillyTavern 原始逻辑。
+
+### 预设内容 CodeMirror 编辑器
+
+启用 `预设内容 CodeMirror 编辑器` 后，扩展会用 CodeMirror 替代 OpenAI prompt 条目内容 textarea，包括 SillyTavern 的放大编辑器。保存前会同步回原始表单字段；如果 CodeMirror 加载失败，会恢复原始 textarea。
+
+`保存条目后自动保存预设` 默认关闭。开启后，保存 prompt 条目编辑时会额外触发当前 OpenAI 预设保存。
+
+### Tokenizer 计数请求批量加速
+
+当柏宝库可用且启用 `Tokenizer 计数请求批量加速` 时，Prompt Manager 刷新 Token 统计会调用柏宝库批量计数接口，减少切换模型或刷新预设时的大量单条计数请求。接口不可用时会回退到原始 Token 统计流程。
+
+## 正则优化列表
+
+启用 `正则快速操作` 后，扩展会用 Vue 管理器接管全局、预设和角色正则列表。
+
+主要能力：
+
+- 单条正则启用/禁用、编辑保存、删除时只更新受影响条目
+- 支持正则条目拖拽排序、跨分组移动和保存分组归属
 - 支持创建、重命名、删除、折叠正则分组
-- 支持对整组正则一键启用或禁用
-- 支持用上移/下移按钮调整分组排序，未分组保持默认兜底组
-- 支持批量选择、批量启用/禁用、批量移动到全局/预设/角色正则、批量删除和批量导出
-- 正则导入后会同步 Vue 列表与分组元数据，减少原版整表刷新带来的卡顿
-- 正则保存会进入待保存队列，并在正则面板关闭或页面生命周期事件中统一 flush，减少连续操作时的重复保存
+- 支持整组正则一键启用或禁用
+- 支持上移/下移调整分组排序，未分组会保留默认兜底组
+- 支持批量选择、批量启用/禁用、批量移动、批量删除和批量导出
+- 支持把选中的正则批量移动到全局、预设或角色正则
+- 导入正则后同步 Vue 列表和分组元数据
+- 正则保存会进入待保存队列，在面板关闭或页面生命周期事件中统一 flush，减少连续操作时的重复保存和重载
 
-The regex quick-operation optimization replaces the stock regex lists with a Vue manager for global, preset, and scoped scripts. It updates affected rows directly, preserves script order and grouping metadata, supports grouped drag sorting and bulk operations, and defers pending saves so repeated operations do not immediately rebuild every regex list.
+## 世界书与编辑器优化
 
-The prompt preset content CodeMirror editor is enabled by default. It replaces the prompt entry content textarea and its expanded editor with a plain CodeMirror editor, flushes content back to SillyTavern before saving, supports read-only marker prompts, and falls back to the original textarea if CodeMirror cannot be loaded.
+### 世界书条目快速展开
 
-The prompt entry auto-save feature is disabled by default. When enabled, saving an OpenAI prompt entry also triggers the current OpenAI preset save action after the prompt edit has been written.
+启用 `世界书条目快速展开` 后，世界书顶层条目展开/收起时会跳过高开销高度动画，保留已经初始化的编辑器，并延迟初始化较重的 Select2 控件和角色过滤选项。
 
-The delete-message edit flow optimization only applies shortly after confirming SillyTavern's delete-message dialog. It opens the requested message editor directly during that cleanup window, then delays common send, regenerate, continue, and impersonate clicks until the fast-opened edit has been submitted. The feature switch preserves SillyTavern's original behavior when disabled.
+### 自定义 CSS 编辑优化
 
-The translation update-event save optimization is enabled by default. It only skips the translation extension's `MESSAGE_UPDATED` listener when automatic translation is off and the updated message does not already have translated display text. When translation automation or cached translation output is present, the original listener still runs.
+`自定义CSS CodeMirror 编辑器` 会用 CodeMirror 接管用户设置里的自定义 CSS 编辑区，并在离开编辑器或页面生命周期事件中再同步和应用样式，减少输入期间的样式重算。
 
-The long-chat DOM render optimization is enabled by default. It activates only when the currently rendered chat floor text is large enough, then applies `content-visibility` and intrinsic height hints to message floors to reduce off-screen layout and paint work. During initial chat load it uses a temporary bottom anchor so late height changes keep the bottom pinned; the anchor is removed after the initial bottom scroll settles.
+`切换美化优化` 会拦截原生 `#customCSS` 的长文本写入，把值重定向到 JavaScript 内存属性，从物理层面避免浏览器因为向原生 textarea 写入大段 CSS 而触发布局和绘制卡顿。开启此项会自动开启自定义 CSS CodeMirror 编辑器。
 
-For local testing inside this repository, the extension can live under:
+### 角色描述 CodeMirror 编辑器
 
-- `public/scripts/extensions/third-party/SillyTavern-Mobile-Resize-Guard`
+启用 `角色描述 CodeMirror 编辑器` 后，角色描述长文本区域会替换为轻量 CodeMirror 6 编辑器。加载失败时会恢复 SillyTavern 原始输入框。
 
-For end-user Git installation through SillyTavern's third-party extension installer, publish the contents of this folder at the root of a separate repository so that `manifest.json` is at the repository root.
-### 角色搜索输入框优化 (Character Search Input Optimization)
-启用后，会在事件流顶层拦截原本的角色搜索输入框交互。能够完美地在输入法拼音打字期间屏蔽搜索触发，并额外加上 300 毫秒防抖。
-此优化可以大幅解决在包含海量角色时，中文拼音输入法导致的界面严重卡顿和被频发的 DOM 重绘打断的问题。
+## 柏宝库分页与加速
 
+柏宝库相关开关位于扩展设置的 `柏宝库` 标签页。面板会显示服务、数据库驱动和 Early Bridge 状态，并提供手动刷新按钮。
+
+这些功能依赖柏宝库接口或 Early Bridge；不可用时会自动回退到 SillyTavern 原生接口。
+
+- `Settings get/save 加速`：通过柏宝库 Early Bridge 接管 `/api/settings/get` 和 `/api/settings/save`。
+- `角色列表请求加速`：把空请求的 `/api/characters/all` 替换为柏宝库快速角色列表接口。
+- `最近聊天请求加速`：把主页 `/api/chats/recent` 替换为柏宝库快速最近聊天接口。
+- `聊天记录分批进入`：进入大聊天时先返回尾部楼层，后台补全完整聊天。
+- `Tokenizer 计数请求批量加速`：Prompt Manager Token 统计使用柏宝库批量计数接口。
+
+### 聊天记录分批进入
+
+启用 `聊天记录分批进入` 后，访问大聊天时会先请求尾部楼层，让页面尽快进入可读状态。完整聊天会在后台继续补全，补全完成后同步 SillyTavern 的聊天数组、校正楼层 ID、恢复滚动位置，并触发必要的聊天加载事件。
+
+补全期间会临时拦截发送、编辑、删除、切换楼层和保存等操作，并提示“聊天记录正在补全，请稍候再操作”。如果柏宝库完整补全失败，会尝试用 SillyTavern 原生聊天读取接口补全；状态过期或聊天切换时会停止本次补全。
+
+## 其他优化
+
+### 翻译更新事件保存优化
+
+启用 `翻译更新事件保存优化` 后，当自动翻译关闭且消息没有翻译缓存时，扩展会跳过翻译扩展在 `MESSAGE_UPDATED` 事件里的无效处理，避免长聊天编辑消息后反复触发全量保存。
+
+如果自动翻译开启，或消息已经有翻译显示缓存，翻译扩展的原逻辑仍会执行。
+
+### 更新提示
+
+`检测到更新弹窗提示` 开启后，扩展检测到可用更新时会弹出确认提示。关闭后仍会显示 `new` 标记和更新按钮。
+
+## 安装
+
+本地测试时，扩展目录可以放在：
+
+```text
+public/scripts/extensions/third-party/SillyTavern-Mobile-Resize-Guard
+```
+
+如果要通过 SillyTavern 第三方扩展安装器安装，请把本目录内容发布到单独仓库的根目录，确保 `manifest.json` 位于仓库根目录。
+
+## 兼容与回退
+
+- 大多数优化都可以在扩展设置面板中单独开关。
+- 依赖柏宝库的功能会检测接口状态；接口不可用、返回异常或不满足条件时会回退到 SillyTavern 原生行为。
+- 聊天文件请求加速只处理普通角色空搜索；群聊和关键词搜索保持原生行为。
+- CodeMirror 相关编辑器加载失败时会恢复原生 textarea。
+- Gzip 保存请求仅在公网访问时启用，并在失败时自动改用未压缩请求重试。
