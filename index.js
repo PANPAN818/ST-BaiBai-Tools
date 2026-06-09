@@ -210,6 +210,7 @@ const defaultSettings = {
     characterSearchInputOptimizationEnabled: true,
     baibaokuSettingsAccelerationEnabled: true,
     fastCharacterListEnabled: true,
+    recentChatListAccelerationEnabled: true,
     characterListAvatarLazyLoadEnabled: true,
     fastChatListEnabled: true,
     welcomeRecentChatDirectOpenEnabled: true,
@@ -410,6 +411,39 @@ async function setBaibaokuCharacterListAccelerationEnabled(enabled) {
     }
 }
 
+async function setBaibaokuRecentChatListAccelerationEnabled(enabled) {
+    const next = Boolean(enabled);
+    const previous = settings.recentChatListAccelerationEnabled !== false;
+    settings.recentChatListAccelerationEnabled = next;
+
+    const bridge = getBaibaokuEarlyBridge();
+    if (typeof bridge?.setRecentChatListAccelerationEnabled === 'function') {
+        bridge.setRecentChatListAccelerationEnabled(next);
+    } else if (bridge) {
+        bridge.recentChatListAccelerationEnabled = next;
+    }
+
+    try {
+        const saved = await saveBaibaokuFastConfig({ recentChatListAccelerationEnabled: next });
+        const savedEnabled = saved.recentChatListAccelerationEnabled !== false;
+        settings.recentChatListAccelerationEnabled = savedEnabled;
+        if (typeof bridge?.setRecentChatListAccelerationEnabled === 'function') {
+            bridge.setRecentChatListAccelerationEnabled(savedEnabled);
+        } else if (bridge) {
+            bridge.recentChatListAccelerationEnabled = savedEnabled;
+        }
+        return saved;
+    } catch (error) {
+        settings.recentChatListAccelerationEnabled = previous;
+        if (typeof bridge?.setRecentChatListAccelerationEnabled === 'function') {
+            bridge.setRecentChatListAccelerationEnabled(previous);
+        } else if (bridge) {
+            bridge.recentChatListAccelerationEnabled = previous;
+        }
+        throw error;
+    }
+}
+
 function normalizeMessageEditClickSettings() {
     if (settings.messageDoubleClickEditEnabled && settings.messageTripleClickEditEnabled) {
         settings.messageDoubleClickEditEnabled = false;
@@ -424,9 +458,11 @@ function saveExtensionSettings() {
     const persistedSettings = { ...settings };
     delete persistedSettings.baibaokuSettingsAccelerationEnabled;
     delete persistedSettings.fastCharacterListEnabled;
+    delete persistedSettings.recentChatListAccelerationEnabled;
     Object.assign(extension_settings[SETTINGS_KEY], persistedSettings);
     delete extension_settings[SETTINGS_KEY].baibaokuSettingsAccelerationEnabled;
     delete extension_settings[SETTINGS_KEY].fastCharacterListEnabled;
+    delete extension_settings[SETTINGS_KEY].recentChatListAccelerationEnabled;
     saveSettingsDebounced();
 }
 
@@ -1990,6 +2026,22 @@ async function renderSettingsPanel() {
             }
         });
 
+    $('#bai_bai_toolkit_recent_chat_list_acceleration_enabled')
+        .prop('checked', settings.recentChatListAccelerationEnabled)
+        .on('input', async function () {
+            const checkbox = $(this);
+            checkbox.prop('disabled', true);
+            try {
+                await setBaibaokuRecentChatListAccelerationEnabled(Boolean(checkbox.prop('checked')));
+            } catch (error) {
+                console.debug(`${LOG_PREFIX} Failed to save BaiBaoKu recent chat list acceleration config`, error);
+                checkbox.prop('checked', settings.recentChatListAccelerationEnabled !== false);
+            } finally {
+                checkbox.prop('disabled', false);
+                refreshBaibaokuPanelStatus(container);
+            }
+        });
+
     $('#bai_bai_toolkit_character_list_avatar_lazy_load_enabled')
         .prop('checked', settings.characterListAvatarLazyLoadEnabled)
         .on('input', function () {
@@ -2062,6 +2114,7 @@ async function refreshBaibaokuPanelStatus(container) {
     const bridgeStatus = container.find('#bai_bai_toolkit_baibaoku_bridge_status');
     const accelerationToggle = container.find('#bai_bai_toolkit_baibaoku_settings_acceleration_enabled');
     const characterListToggle = container.find('#bai_bai_toolkit_fast_character_list_enabled');
+    const recentChatListToggle = container.find('#bai_bai_toolkit_recent_chat_list_acceleration_enabled');
     const bridge = getBaibaokuEarlyBridge();
 
     updateBaibaokuStatusText(bridgeStatus, bridge?.installed
@@ -2084,6 +2137,14 @@ async function refreshBaibaokuPanelStatus(container) {
         characterListToggle.prop('checked', bridgeCharacterListEnabled);
     }
 
+    const bridgeRecentChatListEnabled = typeof bridge?.isRecentChatListAccelerationEnabled === 'function'
+        ? bridge.isRecentChatListAccelerationEnabled()
+        : null;
+    if (typeof bridgeRecentChatListEnabled === 'boolean') {
+        settings.recentChatListAccelerationEnabled = bridgeRecentChatListEnabled;
+        recentChatListToggle.prop('checked', bridgeRecentChatListEnabled);
+    }
+
     updateBaibaokuStatusText(serverStatus, '检测中', null);
     updateBaibaokuStatusText(driverStatus, '检测中', null);
 
@@ -2099,10 +2160,13 @@ async function refreshBaibaokuPanelStatus(container) {
             const config = await fetchBaibaokuFastConfig();
             const settingsEnabled = config.settingsAccelerationEnabled !== false;
             const characterListEnabled = config.characterListAccelerationEnabled !== false;
+            const recentChatListEnabled = config.recentChatListAccelerationEnabled !== false;
             settings.baibaokuSettingsAccelerationEnabled = settingsEnabled;
             settings.fastCharacterListEnabled = characterListEnabled;
+            settings.recentChatListAccelerationEnabled = recentChatListEnabled;
             accelerationToggle.prop('checked', settingsEnabled);
             characterListToggle.prop('checked', characterListEnabled);
+            recentChatListToggle.prop('checked', recentChatListEnabled);
             if (typeof bridge?.setSettingsAccelerationEnabled === 'function') {
                 bridge.setSettingsAccelerationEnabled(settingsEnabled);
             } else if (bridge) {
@@ -2112,6 +2176,11 @@ async function refreshBaibaokuPanelStatus(container) {
                 bridge.setCharacterListAccelerationEnabled(characterListEnabled);
             } else if (bridge) {
                 bridge.characterListAccelerationEnabled = characterListEnabled;
+            }
+            if (typeof bridge?.setRecentChatListAccelerationEnabled === 'function') {
+                bridge.setRecentChatListAccelerationEnabled(recentChatListEnabled);
+            } else if (bridge) {
+                bridge.recentChatListAccelerationEnabled = recentChatListEnabled;
             }
         } catch (error) {
             console.debug(`${LOG_PREFIX} Failed to read BaiBaoKu fast config`, error);
