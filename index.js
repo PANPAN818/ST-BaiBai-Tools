@@ -27,7 +27,7 @@ import * as presetOptimizations from './presetOptimizations.js';
 
 const LOG_PREFIX = '[柏宝箱]';
 const MODULE_NAME = getModuleName();
-const CURRENT_VERSION = '0.24.7';
+const CURRENT_VERSION = '0.24.9';
 const EXTENSION_ID = getExtensionId();
 const SETTINGS_KEY = 'baiBaiToolkit';
 const EXTENSION_KEY = '__baiBaiToolkitExtensionInstalled';
@@ -50,6 +50,8 @@ const SAVE_GENERATE_POLL_TIMEOUT_MS = 90_000;
 const SAVE_GENERATE_RESUME_CHECK_DELAY_MS = 250;
 const SAVE_GENERATE_RESUME_CHECK_COOLDOWN_MS = 1500;
 const SAVE_GENERATE_SEEN_STORAGE_PREFIX = 'bai_bai_toolkit_save_generate_seen';
+const SAVE_GENERATE_DISPLAY_STYLE_ID = 'bai_bai_toolkit_save_generate_display_style';
+const SAVE_GENERATE_DISPLAY_CLASS = 'bai-bai-save-generate-display';
 const SAVE_REQUEST_GZIP_FETCH_KEY = '__baiBaiToolkitSaveRequestGzipFetchPatched';
 const FAST_CHAT_GET_FETCH_KEY = '__baiBaiToolkitFastChatGetFetchPatched';
 const FAST_CHAT_GET_JQUERY_TRIGGER_GUARD_KEY = '__baiBaiToolkitFastChatGetJQueryTriggerGuardPatched';
@@ -10445,6 +10447,8 @@ async function fetchFastCharacterList(fetchFn, input, init) {
 }
 
 function installSaveGenerateFetchHook() {
+    installSaveGenerateDisplayStyle();
+
     const existing = globalThis[SAVE_GENERATE_FETCH_KEY];
     if (existing?.wrappedFetch) {
         existing.isEnabled = () => settings.saveGenerateEnabled === true;
@@ -10973,25 +10977,97 @@ function getCurrentSaveGenerateLastMessageHash() {
         return '';
     }
 
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const message = messages[index];
+    let lastMessage = null;
+    let lastFloor = -1;
+    let floor = -1;
+    for (const message of messages) {
         if (!message || message.chat_metadata) {
             continue;
         }
-        return makeSaveGenerateMessageContentHash(message.mes ?? '');
+        floor += 1;
+        lastMessage = message;
+        lastFloor = floor;
     }
 
-    return '';
+    return lastMessage ? makeSaveGenerateMessageContentHash(lastMessage.mes ?? '', lastFloor) : '';
 }
 
-function makeSaveGenerateMessageContentHash(value) {
+function makeSaveGenerateMessageContentHash(value, floor) {
     const text = String(value ?? '');
+    const numericFloor = floor === null || floor === undefined ? -1 : Number(floor);
+    const normalizedFloor = Number.isInteger(numericFloor) && numericFloor >= 0 ? numericFloor : -1;
+    const hashInput = `${normalizedFloor}\n${text}`;
     let hash = 0x811c9dc5;
-    for (let index = 0; index < text.length; index += 1) {
-        hash ^= text.charCodeAt(index);
+    for (let index = 0; index < hashInput.length; index += 1) {
+        hash ^= hashInput.charCodeAt(index);
         hash = Math.imul(hash, 0x01000193);
     }
-    return `${text.length.toString(36)}:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+    return `m${normalizedFloor}:${text.length.toString(36)}:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function installSaveGenerateDisplayStyle() {
+    if (document.getElementById(SAVE_GENERATE_DISPLAY_STYLE_ID)) {
+        return;
+    }
+
+    const style = document.createElement('style');
+    style.id = SAVE_GENERATE_DISPLAY_STYLE_ID;
+    style.textContent = `
+.${SAVE_GENERATE_DISPLAY_CLASS} {
+    z-index: 50000 !important;
+}
+
+@media (max-width: 768px), (pointer: coarse) {
+    .${SAVE_GENERATE_DISPLAY_CLASS} {
+        top: clamp(max(16px, env(safe-area-inset-top)), 24dvh, 180px) !important;
+        right: auto !important;
+        bottom: auto !important;
+        left: 50% !important;
+        width: calc(100dvw - 16px) !important;
+        max-width: 560px !important;
+        max-height: min(58dvh, 420px) !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+        padding: 10px 12px !important;
+        border-radius: 8px !important;
+        transform: translate(-50%, -12px) !important;
+    }
+
+    .${SAVE_GENERATE_DISPLAY_CLASS}.streaming-display-visible {
+        transform: translate(-50%, 0) !important;
+    }
+
+    .${SAVE_GENERATE_DISPLAY_CLASS} .streaming-display-label {
+        min-height: 28px !important;
+    }
+
+    .${SAVE_GENERATE_DISPLAY_CLASS} .streaming-display-label-text {
+        white-space: normal !important;
+        line-height: 1.35 !important;
+    }
+
+    .${SAVE_GENERATE_DISPLAY_CLASS} .streaming-display-text-content {
+        max-height: 42dvh !important;
+    }
+
+    .${SAVE_GENERATE_DISPLAY_CLASS} .streaming-display-reasoning-content {
+        max-height: 22dvh !important;
+    }
+}
+`;
+    document.head.appendChild(style);
+}
+
+function markSaveGenerateDisplayElement(jobId) {
+    const displays = Array.from(document.querySelectorAll('.streaming-display'));
+    const element = displays.find(item => item instanceof HTMLElement && item.dataset.baibaokuSaveGenerateJobId === String(jobId || ''))
+        || displays[displays.length - 1];
+    if (!(element instanceof HTMLElement)) {
+        return;
+    }
+
+    element.classList.add(SAVE_GENERATE_DISPLAY_CLASS);
+    element.dataset.baibaokuSaveGenerateJobId = String(jobId || '');
 }
 
 function handleSaveGenerateJobForCurrentChat(state, job, chatId, reason = 'unknown') {
@@ -11027,6 +11103,7 @@ function updateSaveGenerateResumeDisplay(state, job) {
     } else {
         display.setLabel(getSaveGenerateDisplayLabel(job));
     }
+    markSaveGenerateDisplayElement(job.id);
 
     if (job.reasoning) {
         display.updateReasoning(job.reasoning);
