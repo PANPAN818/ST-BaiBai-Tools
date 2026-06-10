@@ -244,6 +244,7 @@ const defaultSettings = {
     recentChatListAccelerationEnabled: true,
     progressiveChatLoadingEnabled: false,
     tokenizerBulkCountEnabled: true,
+    extensionManifestBundleEnabled: true,
     characterListAvatarLazyLoadEnabled: true,
     fastChatListEnabled: true,
     welcomeRecentChatDirectOpenEnabled: true,
@@ -535,6 +536,39 @@ async function setBaibaokuTokenizerBulkCountEnabled(enabled) {
     }
 }
 
+async function setBaibaokuExtensionManifestBundleEnabled(enabled) {
+    const next = Boolean(enabled);
+    const previous = settings.extensionManifestBundleEnabled !== false;
+    settings.extensionManifestBundleEnabled = next;
+
+    const bridge = getBaibaokuEarlyBridge();
+    if (typeof bridge?.setExtensionManifestBundleEnabled === 'function') {
+        bridge.setExtensionManifestBundleEnabled(next);
+    } else if (bridge) {
+        bridge.extensionManifestBundleEnabled = next;
+    }
+
+    try {
+        const saved = await saveBaibaokuFastConfig({ extensionManifestBundleEnabled: next });
+        const savedEnabled = saved.extensionManifestBundleEnabled !== false;
+        settings.extensionManifestBundleEnabled = savedEnabled;
+        if (typeof bridge?.setExtensionManifestBundleEnabled === 'function') {
+            bridge.setExtensionManifestBundleEnabled(savedEnabled);
+        } else if (bridge) {
+            bridge.extensionManifestBundleEnabled = savedEnabled;
+        }
+        return saved;
+    } catch (error) {
+        settings.extensionManifestBundleEnabled = previous;
+        if (typeof bridge?.setExtensionManifestBundleEnabled === 'function') {
+            bridge.setExtensionManifestBundleEnabled(previous);
+        } else if (bridge) {
+            bridge.extensionManifestBundleEnabled = previous;
+        }
+        throw error;
+    }
+}
+
 function normalizeMessageEditClickSettings() {
     if (settings.messageDoubleClickEditEnabled && settings.messageTripleClickEditEnabled) {
         settings.messageDoubleClickEditEnabled = false;
@@ -551,11 +585,13 @@ function saveExtensionSettings() {
     delete persistedSettings.fastCharacterListEnabled;
     delete persistedSettings.recentChatListAccelerationEnabled;
     delete persistedSettings.progressiveChatLoadingEnabled;
+    delete persistedSettings.extensionManifestBundleEnabled;
     Object.assign(extension_settings[SETTINGS_KEY], persistedSettings);
     delete extension_settings[SETTINGS_KEY].baibaokuSettingsAccelerationEnabled;
     delete extension_settings[SETTINGS_KEY].fastCharacterListEnabled;
     delete extension_settings[SETTINGS_KEY].recentChatListAccelerationEnabled;
     delete extension_settings[SETTINGS_KEY].progressiveChatLoadingEnabled;
+    delete extension_settings[SETTINGS_KEY].extensionManifestBundleEnabled;
     saveSettingsDebounced();
 }
 
@@ -2103,6 +2139,22 @@ async function renderSettingsPanel() {
             }
         });
 
+    $('#bai_bai_toolkit_extension_manifest_bundle_enabled')
+        .prop('checked', settings.extensionManifestBundleEnabled)
+        .on('input', async function () {
+            const checkbox = $(this);
+            checkbox.prop('disabled', true);
+            try {
+                await setBaibaokuExtensionManifestBundleEnabled(Boolean(checkbox.prop('checked')));
+            } catch (error) {
+                console.debug(`${LOG_PREFIX} Failed to save BaiBaoKu extension manifest bundle config`, error);
+                checkbox.prop('checked', settings.extensionManifestBundleEnabled !== false);
+            } finally {
+                checkbox.prop('disabled', false);
+                applyBaibaokuPanelLocalState(container);
+            }
+        });
+
     $('#bai_bai_toolkit_fast_character_list_enabled')
         .prop('checked', settings.fastCharacterListEnabled)
         .on('input', async function () {
@@ -2255,6 +2307,8 @@ function applyBaibaokuPanelLocalState(container) {
 
     container.find('#bai_bai_toolkit_baibaoku_settings_acceleration_enabled')
         .prop('checked', settings.baibaokuSettingsAccelerationEnabled !== false);
+    container.find('#bai_bai_toolkit_extension_manifest_bundle_enabled')
+        .prop('checked', settings.extensionManifestBundleEnabled !== false);
     container.find('#bai_bai_toolkit_fast_character_list_enabled')
         .prop('checked', settings.fastCharacterListEnabled !== false);
     container.find('#bai_bai_toolkit_recent_chat_list_acceleration_enabled')
@@ -2314,6 +2368,7 @@ async function refreshBaibaokuPanelStatus(container, { force = false } = {}) {
     const driverStatus = container.find('#bai_bai_toolkit_baibaoku_driver_status');
     const bridgeStatus = container.find('#bai_bai_toolkit_baibaoku_bridge_status');
     const accelerationToggle = container.find('#bai_bai_toolkit_baibaoku_settings_acceleration_enabled');
+    const extensionManifestBundleToggle = container.find('#bai_bai_toolkit_extension_manifest_bundle_enabled');
     const characterListToggle = container.find('#bai_bai_toolkit_fast_character_list_enabled');
     const recentChatListToggle = container.find('#bai_bai_toolkit_recent_chat_list_acceleration_enabled');
     const progressiveChatLoadingToggle = container.find('#bai_bai_toolkit_progressive_chat_loading_enabled');
@@ -2330,6 +2385,14 @@ async function refreshBaibaokuPanelStatus(container, { force = false } = {}) {
     if (typeof bridgeEnabled === 'boolean') {
         settings.baibaokuSettingsAccelerationEnabled = bridgeEnabled;
         accelerationToggle.prop('checked', bridgeEnabled);
+    }
+
+    const bridgeExtensionManifestBundleEnabled = typeof bridge?.isExtensionManifestBundleEnabled === 'function'
+        ? bridge.isExtensionManifestBundleEnabled()
+        : null;
+    if (typeof bridgeExtensionManifestBundleEnabled === 'boolean') {
+        settings.extensionManifestBundleEnabled = bridgeExtensionManifestBundleEnabled;
+        extensionManifestBundleToggle.prop('checked', bridgeExtensionManifestBundleEnabled);
     }
 
     const bridgeCharacterListEnabled = typeof bridge?.isCharacterListAccelerationEnabled === 'function'
@@ -2377,6 +2440,7 @@ async function refreshBaibaokuPanelStatus(container, { force = false } = {}) {
         try {
             const config = await fetchBaibaokuFastConfig();
             const settingsEnabled = config.settingsAccelerationEnabled !== false;
+            const extensionManifestBundleEnabled = config.extensionManifestBundleEnabled !== false;
             const characterListEnabled = config.characterListAccelerationEnabled !== false;
             const recentChatListEnabled = config.recentChatListAccelerationEnabled !== false;
             const progressiveChatLoadingEnabled = config.progressiveChatLoadingEnabled === true;
@@ -2388,11 +2452,13 @@ async function refreshBaibaokuPanelStatus(container, { force = false } = {}) {
                 updatedAt: Date.now(),
             };
             settings.baibaokuSettingsAccelerationEnabled = settingsEnabled;
+            settings.extensionManifestBundleEnabled = extensionManifestBundleEnabled;
             settings.fastCharacterListEnabled = characterListEnabled;
             settings.recentChatListAccelerationEnabled = recentChatListEnabled;
             settings.progressiveChatLoadingEnabled = progressiveChatLoadingEnabled;
             settings.tokenizerBulkCountEnabled = tokenizerBulkCountEnabled;
             accelerationToggle.prop('checked', settingsEnabled);
+            extensionManifestBundleToggle.prop('checked', extensionManifestBundleEnabled);
             characterListToggle.prop('checked', characterListEnabled);
             recentChatListToggle.prop('checked', recentChatListEnabled);
             progressiveChatLoadingToggle.prop('checked', progressiveChatLoadingEnabled);
@@ -2407,6 +2473,11 @@ async function refreshBaibaokuPanelStatus(container, { force = false } = {}) {
                 bridge.setCharacterListAccelerationEnabled(characterListEnabled);
             } else if (bridge) {
                 bridge.characterListAccelerationEnabled = characterListEnabled;
+            }
+            if (typeof bridge?.setExtensionManifestBundleEnabled === 'function') {
+                bridge.setExtensionManifestBundleEnabled(extensionManifestBundleEnabled);
+            } else if (bridge) {
+                bridge.extensionManifestBundleEnabled = extensionManifestBundleEnabled;
             }
             if (typeof bridge?.setRecentChatListAccelerationEnabled === 'function') {
                 bridge.setRecentChatListAccelerationEnabled(recentChatListEnabled);
