@@ -22,7 +22,7 @@ import { sendMessageAs } from '../../../slash-commands.js';
 import { isAdmin } from '../../../user.js';
 import { debounce, download, getFileText, regexFromString, resetScrollHeight, setInfoBlock, uuidv4 } from '../../../utils.js';
 import { getCurrentPresetAPI as getRegexCurrentPresetAPI, getCurrentPresetName as getRegexCurrentPresetName, getScriptsByType as getRegexScriptsByType, runRegexScript, SCRIPT_TYPES as REGEX_SCRIPT_TYPES, substitute_find_regex } from '../../regex/engine.js';
-import { StreamingDisplay } from '../../../streaming-display.js';
+import { SaveGenerateDisplay } from './saveGenerateDisplay.js';
 import * as chatOptimizations from './chatOptimizations.js';
 import * as presetOptimizations from './presetOptimizations.js';
 
@@ -372,6 +372,7 @@ presetOptimizations.configurePresetOptimizations({
     loadCodeMirrorModules: loadDescriptionCodeMirrorModules,
     codeMirrorHistoryMaxLength: DESCRIPTION_CODEMIRROR_HISTORY_MAX_LENGTH,
 });
+presetOptimizations.installOpenAITokenizerBulkBridge();
 
 initializeSettings();
 initializeExtensionUpdateCheck();
@@ -11843,7 +11844,151 @@ function installSaveGenerateDisplayStyle() {
     style.id = SAVE_GENERATE_DISPLAY_STYLE_ID;
     style.textContent = `
 .${SAVE_GENERATE_DISPLAY_CLASS} {
+    position: fixed !important;
+    top: 18px !important;
+    right: 18px !important;
+    bottom: auto !important;
+    left: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    width: min(520px, calc(100vw - 36px)) !important;
+    max-height: min(70vh, 620px) !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    padding: 10px 12px !important;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.18)) !important;
+    border-radius: 8px !important;
+    background: var(--SmartThemeBlurTintColor, rgba(32, 32, 32, 0.96)) !important;
+    color: var(--SmartThemeBodyColor, #f1f1f1) !important;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28) !important;
+    opacity: 0 !important;
+    transform: translateY(-8px) !important;
+    transition: opacity 220ms ease, transform 220ms ease !important;
     z-index: 50000 !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS}.bai-bai-save-generate-display-visible {
+    opacity: 1 !important;
+    transform: translateY(0) !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS}.bai-bai-save-generate-display-minimized .bai-bai-save-generate-display-content {
+    display: none !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-label {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    min-height: 28px !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-led {
+    flex: 0 0 auto !important;
+    width: 9px !important;
+    height: 9px !important;
+    border-radius: 50% !important;
+    background: #ffb020 !important;
+    box-shadow: 0 0 0 0 rgba(255, 176, 32, 0.7) !important;
+    animation: bai-bai-save-generate-pulse 1.4s infinite !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS}.bai-bai-save-generate-display-complete .bai-bai-save-generate-display-led {
+    background: #35c759 !important;
+    box-shadow: 0 0 8px rgba(53, 199, 89, 0.8) !important;
+    animation: none !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS}.bai-bai-save-generate-display-stopped .bai-bai-save-generate-display-led {
+    background: #ff453a !important;
+    box-shadow: 0 0 8px rgba(255, 69, 58, 0.75) !important;
+    animation: none !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-label-text {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    overflow-wrap: anywhere !important;
+    font-weight: 600 !important;
+    line-height: 1.35 !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-controls {
+    display: flex !important;
+    flex: 0 0 auto !important;
+    align-items: center !important;
+    gap: 4px !important;
+    margin-left: auto !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 26px !important;
+    height: 26px !important;
+    min-width: 26px !important;
+    min-height: 26px !important;
+    padding: 0 !important;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.18)) !important;
+    border-radius: 6px !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: inherit !important;
+    line-height: 1 !important;
+    cursor: pointer !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-btn:hover {
+    background: rgba(255, 255, 255, 0.14) !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-btn:disabled {
+    cursor: default !important;
+    opacity: 0.55 !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-content {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    min-height: 0 !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-reasoning,
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-text {
+    min-height: 0 !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-reasoning-label {
+    margin-bottom: 4px !important;
+    opacity: 0.75 !important;
+    font-size: 0.9em !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-reasoning-content,
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-text-content {
+    max-height: 42vh !important;
+    overflow: auto !important;
+    overflow-wrap: anywhere !important;
+    line-height: 1.45 !important;
+}
+
+.${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-reasoning-content {
+    max-height: 22vh !important;
+    opacity: 0.88 !important;
+}
+
+@keyframes bai-bai-save-generate-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(255, 176, 32, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 8px rgba(255, 176, 32, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(255, 176, 32, 0);
+    }
 }
 
 @media (max-width: 768px), (pointer: coarse) {
@@ -11862,24 +12007,24 @@ function installSaveGenerateDisplayStyle() {
         transform: translate(-50%, -12px) !important;
     }
 
-    .${SAVE_GENERATE_DISPLAY_CLASS}.streaming-display-visible {
+    .${SAVE_GENERATE_DISPLAY_CLASS}.bai-bai-save-generate-display-visible {
         transform: translate(-50%, 0) !important;
     }
 
-    .${SAVE_GENERATE_DISPLAY_CLASS} .streaming-display-label {
+    .${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-label {
         min-height: 28px !important;
     }
 
-    .${SAVE_GENERATE_DISPLAY_CLASS} .streaming-display-label-text {
+    .${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-label-text {
         white-space: normal !important;
         line-height: 1.35 !important;
     }
 
-    .${SAVE_GENERATE_DISPLAY_CLASS} .streaming-display-text-content {
+    .${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-text-content {
         max-height: 42dvh !important;
     }
 
-    .${SAVE_GENERATE_DISPLAY_CLASS} .streaming-display-reasoning-content {
+    .${SAVE_GENERATE_DISPLAY_CLASS} .bai-bai-save-generate-display-reasoning-content {
         max-height: 22dvh !important;
     }
 }
@@ -11888,7 +12033,7 @@ function installSaveGenerateDisplayStyle() {
 }
 
 function markSaveGenerateDisplayElement(jobId) {
-    const displays = Array.from(document.querySelectorAll('.streaming-display'));
+    const displays = Array.from(document.querySelectorAll(`.${SAVE_GENERATE_DISPLAY_CLASS}`));
     const element = displays.find(item => item instanceof HTMLElement && item.dataset.baibaokuSaveGenerateJobId === String(jobId || ''))
         || displays[displays.length - 1];
     if (!(element instanceof HTMLElement)) {
@@ -11933,7 +12078,7 @@ function updateSaveGenerateResumeDisplay(state, job) {
 
     let display = state.resumeDisplays.get(job.id);
     if (!display) {
-        display = new StreamingDisplay();
+        display = new SaveGenerateDisplay();
         display.show({
             label: getSaveGenerateDisplayLabel(job),
             onStop: () => stopSaveGenerateResumeJob(state, job.id),
