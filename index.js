@@ -17,7 +17,7 @@ import { t } from '../../../i18n.js';
 import { callGenericPopup, POPUP_RESULT, POPUP_TYPE } from '../../../popup.js';
 import { isMobile, favsToHotswap } from '../../../RossAscends-mods.js';
 import { getPresetManager } from '../../../preset-manager.js';
-import { power_user } from '../../../power-user.js';
+import { applyPowerUserSettings, power_user } from '../../../power-user.js';
 import { sendMessageAs } from '../../../slash-commands.js';
 import { isAdmin } from '../../../user.js';
 import { debounce, download, getFileText, regexFromString, resetScrollHeight, setInfoBlock, uuidv4 } from '../../../utils.js';
@@ -35,9 +35,11 @@ const EXTENSION_KEY = '__baiBaiToolkitExtensionInstalled';
 const FAST_SETTINGS_BOOTSTRAP_FETCH_KEY = '__baiBaiToolkitFastSettingsBootstrapFetchPatched';
 const FAST_CHARACTER_LIST_FETCH_KEY = '__baiBaiToolkitFastCharacterListFetchPatched';
 const BAIBAOKU_EARLY_BRIDGE_KEY = '__baibaokuEarlyBridge';
+const LAZY_THEME_CHANGE_GUARD_KEY = '__baiBaiToolkitLazyThemeChangeGuard';
 const BAIBAOKU_STATUS_URL = '/api/plugins/baibaoku/v1/status';
 const BAIBAOKU_FAST_CONFIG_URL = '/api/plugins/baibaoku/v1/fast-config';
 const BAIBAOKU_FAST_CHAT_GET_URL = '/api/plugins/baibaoku/v1/chats/fast-get';
+const BAIBAOKU_THEME_GET_URL = '/api/plugins/baibaoku/v1/themes/get';
 const BAIBAOKU_SAVE_GENERATE_URL = '/api/plugins/baibaoku/v1/chats/save-generate';
 const BAIBAOKU_STATUS_TIMEOUT_MS = 3000;
 const BAIBAOKU_PANEL_STATUS_CACHE_MS = 5 * 60_000;
@@ -66,6 +68,58 @@ const DESCRIPTION_CODEMIRROR_EDITOR_STYLE_ID = 'bai_bai_toolkit_description_code
 const CUSTOM_CSS_CODEMIRROR_EDITOR_STYLE_ID = 'bai_bai_toolkit_custom_css_codemirror_editor_style';
 const DESCRIPTION_CODEMIRROR_EDITOR_KEY = '__baiBaiToolkitDescriptionCodeMirrorEditor';
 const DESCRIPTION_CODEMIRROR_MODULES_KEY = '__baiBaiToolkitDescriptionCodeMirrorModules';
+const BAIBAOKU_THEME_POWER_USER_KEYS = [
+    'main_text_color',
+    'italics_text_color',
+    'underline_text_color',
+    'quote_text_color',
+    'blur_tint_color',
+    'chat_tint_color',
+    'user_mes_blur_tint_color',
+    'bot_mes_blur_tint_color',
+    'shadow_color',
+    'border_color',
+    'blur_strength',
+    'custom_css',
+    'shadow_width',
+    'font_scale',
+    'fast_ui_mode',
+    'waifuMode',
+    'chat_display',
+    'toastr_position',
+    'avatar_style',
+    'noShadows',
+    'chat_width',
+    'timer_enabled',
+    'timestamps_enabled',
+    'timestamp_model_icon',
+    'message_token_count_enabled',
+    'mesIDDisplay_enabled',
+    'hideChatAvatars_enabled',
+    'expand_message_actions',
+    'enableZenSliders',
+    'enableLabMode',
+    'hotswap_enabled',
+    'bogus_folders',
+    'zoomed_avatar_magnification',
+    'reduced_motion',
+    'compact_input_area',
+    'show_swipe_num_all_messages',
+    'click_to_edit',
+    'media_display',
+];
+const BAIBAOKU_THEME_COLOR_BINDINGS = [
+    { key: 'main_text_color', selector: '#main-text-color-picker', variable: '--SmartThemeBodyColor' },
+    { key: 'italics_text_color', selector: '#italics-color-picker', variable: '--SmartThemeEmColor' },
+    { key: 'underline_text_color', selector: '#underline-color-picker', variable: '--SmartThemeUnderlineColor' },
+    { key: 'quote_text_color', selector: '#quote-color-picker', variable: '--SmartThemeQuoteColor' },
+    { key: 'blur_tint_color', selector: '#blur-tint-color-picker', variable: '--SmartThemeBlurTintColor', metaTheme: true },
+    { key: 'chat_tint_color', selector: '#chat-tint-color-picker', variable: '--SmartThemeChatTintColor' },
+    { key: 'user_mes_blur_tint_color', selector: '#user-mes-blur-tint-color-picker', variable: '--SmartThemeUserMesBlurTintColor' },
+    { key: 'bot_mes_blur_tint_color', selector: '#bot-mes-blur-tint-color-picker', variable: '--SmartThemeBotMesBlurTintColor' },
+    { key: 'shadow_color', selector: '#shadow-color-picker', variable: '--SmartThemeShadowColor' },
+    { key: 'border_color', selector: '#border-color-picker', variable: '--SmartThemeBorderColor' },
+];
 const REGEX_QUICK_OPERATION_HANDLER_KEY = '__baiBaiToolkitRegexQuickOperationHandler';
 const REGEX_QUICK_OPERATION_OBSERVER_KEY = '__baiBaiToolkitRegexQuickOperationObserver';
 const REGEX_QUICK_OPERATION_IMPORT_HANDLER_KEY = '__baiBaiToolkitRegexQuickOperationImportHandler';
@@ -402,6 +456,264 @@ function initializeSettings() {
 function getBaibaokuEarlyBridge() {
     const bridge = globalThis[BAIBAOKU_EARLY_BRIDGE_KEY];
     return bridge && typeof bridge === 'object' ? bridge : null;
+}
+
+function getLazyThemeChangeGuardState() {
+    if (!globalThis[LAZY_THEME_CHANGE_GUARD_KEY] || typeof globalThis[LAZY_THEME_CHANGE_GUARD_KEY] !== 'object') {
+        globalThis[LAZY_THEME_CHANGE_GUARD_KEY] = {
+            installed: false,
+            handler: null,
+            pending: null,
+            replaying: false,
+            currentThemeName: '',
+        };
+    }
+
+    return globalThis[LAZY_THEME_CHANGE_GUARD_KEY];
+}
+
+async function fetchBaibaokuThemeByName(name) {
+    const response = await fetch(BAIBAOKU_THEME_GET_URL, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ name }),
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+        const error = new Error(payload?.message || `Theme request failed: ${response.status}`);
+        error.status = response.status;
+        error.payload = payload;
+        throw error;
+    }
+
+    const theme = payload?.data;
+    if (!theme || typeof theme !== 'object' || Array.isArray(theme)) {
+        throw new Error('Theme response payload is invalid');
+    }
+
+    return theme;
+}
+
+function applyBaibaokuThemeColorBindings() {
+    for (const { key, selector, variable, metaTheme } of BAIBAOKU_THEME_COLOR_BINDINGS) {
+        const value = power_user[key];
+        if (value === undefined) {
+            continue;
+        }
+
+        if (selector) {
+            $(selector).attr('color', value);
+        }
+
+        if (variable) {
+            document.documentElement.style.setProperty(variable, String(value));
+        }
+
+        if (key === 'main_text_color') {
+            const colorMatch = String(value).match(/\(([^)]+)\)/);
+            const colorParts = colorMatch ? colorMatch[1].split(',').map(part => part.trim()) : [];
+            if (colorParts.length >= 4) {
+                document.documentElement.style.setProperty('--SmartThemeCheckboxBgColorR', colorParts[0]);
+                document.documentElement.style.setProperty('--SmartThemeCheckboxBgColorG', colorParts[1]);
+                document.documentElement.style.setProperty('--SmartThemeCheckboxBgColorB', colorParts[2]);
+                document.documentElement.style.setProperty('--SmartThemeCheckboxBgColorA', colorParts[3]);
+            }
+        }
+
+        if (metaTheme) {
+            document.querySelector('meta[name=theme-color]')?.setAttribute('content', String(value));
+        }
+    }
+}
+
+function applyBaibaokuThemeSelectState() {
+    $('#chat_display').val(power_user.chat_display);
+    $(`#chat_display option[value=${power_user.chat_display}]`).prop('selected', true);
+    $('#toastr_position').val(power_user.toastr_position);
+    $(`#toastr_position option[value="${power_user.toastr_position}"]`).prop('selected', true);
+    $('#media_display').val(power_user.media_display);
+}
+
+function ensureBaibaokuSelectOption(selectId, value, text = value) {
+    const select = document.getElementById(selectId);
+    if (!(select instanceof HTMLSelectElement) || !value) {
+        return null;
+    }
+
+    const existing = Array.from(select.options).find(option => option.value === value);
+    if (existing) {
+        return existing;
+    }
+
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = text;
+    select.append(option);
+    return option;
+}
+
+function refreshBaibaokuSelectDisplay(selectId) {
+    const select = document.getElementById(selectId);
+    if (!(select instanceof HTMLSelectElement)) {
+        return;
+    }
+
+    const selectedOption = select.options[select.selectedIndex] || null;
+    const selectedText = selectedOption?.textContent || select.value;
+    const $select = $(`#${selectId}`);
+    if (typeof $select.select2 === 'function' && ($select.data('select2') || $select.hasClass('select2-hidden-accessible'))) {
+        $select.trigger('change.select2');
+        const rendered = $select.data('select2')?.$container?.find?.('.select2-selection__rendered');
+        if (rendered?.length && selectedText) {
+            rendered.text(selectedText).attr('title', selectedText);
+        }
+    }
+}
+
+function setBaibaokuSelectValue(selectId, value, text = value) {
+    const select = document.getElementById(selectId);
+    const option = ensureBaibaokuSelectOption(selectId, value, text);
+    if (!(select instanceof HTMLSelectElement) || !option) {
+        return;
+    }
+
+    option.selected = true;
+    select.value = value;
+    $(`#${selectId}`).val(value);
+    refreshBaibaokuSelectDisplay(selectId);
+}
+
+function syncCustomCssCodeMirrorFromThemeChange() {
+    const state = extensionState[CUSTOM_CSS_CODEMIRROR_EDITOR_KEY];
+    if (!state?.enabled || !state.view) {
+        return false;
+    }
+
+    const value = String(power_user.custom_css ?? '');
+    const originalInput = getCustomCssOriginalInput();
+    if (originalInput) {
+        originalInput.value = value;
+    }
+    if (state.source instanceof HTMLTextAreaElement) {
+        state.source.value = value;
+    }
+
+    state.dirty = false;
+    return syncCustomCssCodeMirrorFromSource(state, { force: true }) === true;
+}
+
+function scheduleCustomCssCodeMirrorThemeSync() {
+    const sync = () => {
+        try {
+            if (syncCustomCssCodeMirrorFromThemeChange()) {
+                console.debug(`${LOG_PREFIX} CodeMirror custom CSS editor synced after theme change`);
+            }
+        } catch (error) {
+            console.debug(`${LOG_PREFIX} Failed to sync CodeMirror custom CSS editor after theme change`, error);
+        }
+    };
+
+    if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(sync);
+    } else {
+        setTimeout(sync, 0);
+    }
+}
+
+function applyBaibaokuThemeObject(theme, fallbackName) {
+    const themeName = typeof theme?.name === 'string' && theme.name ? theme.name : fallbackName;
+    if (!themeName) {
+        throw new Error('Theme name is missing');
+    }
+
+    const oldChatDisplay = power_user.chat_display;
+    const oldToastrPosition = power_user.toastr_position;
+    power_user.theme = themeName;
+    for (const key of BAIBAOKU_THEME_POWER_USER_KEYS) {
+        if (theme[key] !== undefined) {
+            power_user[key] = theme[key];
+        }
+    }
+
+    setBaibaokuSelectValue('themes', themeName);
+    applyBaibaokuThemeColorBindings();
+    applyBaibaokuThemeSelectState();
+    applyPowerUserSettings();
+    setBaibaokuSelectValue('themes', themeName);
+    applyBaibaokuThemeColorBindings();
+    applyBaibaokuThemeSelectState();
+    if (oldChatDisplay !== power_user.chat_display) {
+        $('#chat_display').trigger('change');
+    }
+    if (oldToastrPosition !== power_user.toastr_position) {
+        $('#toastr_position').trigger('change');
+    }
+    saveSettingsDebounced();
+    scheduleCustomCssCodeMirrorThemeSync();
+    console.log(`${LOG_PREFIX} theme applied: ${themeName}`);
+}
+
+function applyBaibaokuLazyThemeLoadingOptimization() {
+    const state = getLazyThemeChangeGuardState();
+    if (state.installed || typeof document === 'undefined') {
+        return;
+    }
+
+    state.handler = function baiBaiToolkitLazyThemeChangeGuard(event) {
+        const target = event?.target;
+        if (!(target instanceof HTMLSelectElement) || target.id !== 'themes' || state.replaying) {
+            return;
+        }
+
+        const themeName = String(target.value || '');
+        if (!themeName) {
+            return;
+        }
+
+        if (settings.baibaokuSettingsAccelerationEnabled === false) {
+            state.currentThemeName = themeName;
+            return;
+        }
+
+        const bridge = getBaibaokuEarlyBridge();
+        if (!bridge?.installed) {
+            state.currentThemeName = themeName;
+            return;
+        }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        const previousThemeName = state.currentThemeName || String(power_user?.theme || '');
+        target.disabled = true;
+
+        state.pending = fetchBaibaokuThemeByName(themeName)
+            .then((theme) => {
+                if (typeof bridge.ensureThemeLoaded === 'function') {
+                    void bridge.ensureThemeLoaded(themeName).catch(() => null);
+                }
+                applyBaibaokuThemeObject(theme, themeName);
+                state.currentThemeName = themeName;
+            })
+            .catch((error) => {
+                if (error?.status === 404 && typeof bridge.clearSettingsGetCache === 'function') {
+                    bridge.clearSettingsGetCache('theme-not-found');
+                }
+                if (previousThemeName) {
+                    setBaibaokuSelectValue('themes', previousThemeName);
+                }
+                console.warn(`${LOG_PREFIX} Failed to lazy-load theme`, error);
+            })
+            .finally(() => {
+                target.disabled = false;
+                state.pending = null;
+            });
+    };
+
+    document.addEventListener('change', state.handler, true);
+    state.installed = true;
 }
 
 async function setBaibaokuSettingsAccelerationEnabled(enabled) {
@@ -2691,6 +3003,7 @@ function applyFeatureSettings() {
     chatOptimizations.applyMobileMessageEditScrollGuard();
     chatOptimizations.applyMessageTripleClickEdit();
     chatOptimizations.applyMessageCompletionSound();
+    applyBaibaokuLazyThemeLoadingOptimization();
 }
 
 function applyCustomCssInputOptimization() {
