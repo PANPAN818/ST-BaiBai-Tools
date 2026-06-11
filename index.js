@@ -28,7 +28,7 @@ import * as presetOptimizations from './presetOptimizations.js';
 
 const LOG_PREFIX = '[柏宝箱]';
 const MODULE_NAME = getModuleName();
-const CURRENT_VERSION = '0.24.19';
+const CURRENT_VERSION = '0.25';
 const EXTENSION_ID = getExtensionId();
 const SETTINGS_KEY = 'baiBaiToolkit';
 const EXTENSION_KEY = '__baiBaiToolkitExtensionInstalled';
@@ -64,6 +64,7 @@ const SAVE_GENERATE_RECOVERY_BLOCK_SELECTOR = '#send_but, #option_regenerate';
 const SAVE_GENERATE_RECOVERY_BLOCK_TOAST_INTERVAL_MS = 1500;
 const SAVE_GENERATE_RECOVERY_CHAT_READY_TIMEOUT_MS = 3000;
 const SAVE_GENERATE_RECOVERY_CHAT_READY_INTERVAL_MS = 100;
+const SAVE_GENERATE_DEFAULT_ENABLED_MIGRATION_KEY = 'saveGenerateDefaultEnabledMigrated';
 const SAVE_REQUEST_GZIP_FETCH_KEY = '__baiBaiToolkitSaveRequestGzipFetchPatched';
 const FAST_CHAT_GET_FETCH_KEY = '__baiBaiToolkitFastChatGetFetchPatched';
 const FAST_CHAT_GET_JQUERY_TRIGGER_GUARD_KEY = '__baiBaiToolkitFastChatGetJQueryTriggerGuardPatched';
@@ -321,7 +322,7 @@ const defaultSettings = {
     fastCharacterListEnabled: true,
     recentChatListAccelerationEnabled: true,
     progressiveChatLoadingEnabled: false,
-    saveGenerateEnabled: false,
+    saveGenerateEnabled: true,
     tokenizerBulkCountEnabled: true,
     extensionManifestBundleEnabled: true,
     characterListAvatarLazyLoadEnabled: true,
@@ -432,12 +433,18 @@ function initializeSettings() {
     }
 
     let removedLegacySetting = false;
+    let migratedSaveGenerateDefault = false;
 
     if (
         typeof extension_settings[SETTINGS_KEY].baibaokuSettingsAccelerationEnabled !== 'boolean'
         && typeof extension_settings[SETTINGS_KEY].fastSettingsBootstrapEnabled === 'boolean'
     ) {
         extension_settings[SETTINGS_KEY].baibaokuSettingsAccelerationEnabled = extension_settings[SETTINGS_KEY].fastSettingsBootstrapEnabled;
+    }
+
+    if (extension_settings[SETTINGS_KEY].progressiveChatLoadingEnabled === true) {
+        extension_settings[SETTINGS_KEY].progressiveChatLoadingEnabled = false;
+        removedLegacySetting = true;
     }
 
     for (const key of legacySettingsKeys) {
@@ -447,6 +454,14 @@ function initializeSettings() {
         }
     }
 
+    if (extension_settings[SETTINGS_KEY][SAVE_GENERATE_DEFAULT_ENABLED_MIGRATION_KEY] !== true) {
+        if (extension_settings[SETTINGS_KEY].saveGenerateEnabled === false) {
+            extension_settings[SETTINGS_KEY].saveGenerateEnabled = true;
+        }
+        extension_settings[SETTINGS_KEY][SAVE_GENERATE_DEFAULT_ENABLED_MIGRATION_KEY] = true;
+        migratedSaveGenerateDefault = true;
+    }
+
     for (const [key, value] of Object.entries(defaultSettings)) {
         if (typeof extension_settings[SETTINGS_KEY][key] !== typeof value) {
             extension_settings[SETTINGS_KEY][key] = value;
@@ -454,9 +469,10 @@ function initializeSettings() {
     }
 
     Object.assign(settings, defaultSettings, extension_settings[SETTINGS_KEY]);
+    delete settings[SAVE_GENERATE_DEFAULT_ENABLED_MIGRATION_KEY];
     const normalizedMessageEditClickSetting = normalizeMessageEditClickSettings();
 
-    if (removedLegacySetting || normalizedMessageEditClickSetting) {
+    if (removedLegacySetting || migratedSaveGenerateDefault || normalizedMessageEditClickSetting) {
         saveSettingsDebounced();
     }
 }
@@ -969,19 +985,17 @@ async function setBaibaokuRecentChatListAccelerationEnabled(enabled) {
 }
 
 async function setBaibaokuProgressiveChatLoadingEnabled(enabled) {
-    const next = Boolean(enabled);
     const previous = settings.progressiveChatLoadingEnabled === true;
-    settings.progressiveChatLoadingEnabled = next;
+    settings.progressiveChatLoadingEnabled = false;
     applyFastChatGetOptimization();
 
     try {
-        const saved = await saveBaibaokuFastConfig({ progressiveChatLoadingEnabled: next });
-        const savedEnabled = saved.progressiveChatLoadingEnabled === true;
-        settings.progressiveChatLoadingEnabled = savedEnabled;
+        const saved = await saveBaibaokuFastConfig({ progressiveChatLoadingEnabled: false });
+        settings.progressiveChatLoadingEnabled = false;
         applyFastChatGetOptimization();
         return saved;
     } catch (error) {
-        settings.progressiveChatLoadingEnabled = previous;
+        settings.progressiveChatLoadingEnabled = false;
         applyFastChatGetOptimization();
         throw error;
     }
@@ -2672,17 +2686,18 @@ async function renderSettingsPanel() {
         });
 
     $('#bai_bai_toolkit_progressive_chat_loading_enabled')
-        .prop('checked', settings.progressiveChatLoadingEnabled)
+        .prop('checked', false)
+        .prop('disabled', true)
         .on('input', async function () {
             const checkbox = $(this);
             checkbox.prop('disabled', true);
             try {
-                await setBaibaokuProgressiveChatLoadingEnabled(Boolean(checkbox.prop('checked')));
+                await setBaibaokuProgressiveChatLoadingEnabled(false);
             } catch (error) {
                 console.debug(`${LOG_PREFIX} Failed to save BaiBaoKu progressive chat loading config`, error);
-                checkbox.prop('checked', settings.progressiveChatLoadingEnabled === true);
             } finally {
-                checkbox.prop('disabled', false);
+                checkbox.prop('checked', false);
+                checkbox.prop('disabled', true);
                 applyBaibaokuPanelLocalState(container);
             }
         });
@@ -2806,7 +2821,8 @@ function applyBaibaokuPanelLocalState(container) {
     container.find('#bai_bai_toolkit_recent_chat_list_acceleration_enabled')
         .prop('checked', settings.recentChatListAccelerationEnabled !== false);
     container.find('#bai_bai_toolkit_progressive_chat_loading_enabled')
-        .prop('checked', settings.progressiveChatLoadingEnabled === true);
+        .prop('checked', false)
+        .prop('disabled', true);
     container.find('#bai_bai_toolkit_save_generate_enabled')
         .prop('checked', settings.saveGenerateEnabled === true);
     container.find('#bai_bai_toolkit_tokenizer_bulk_count_enabled')
@@ -2937,7 +2953,7 @@ async function refreshBaibaokuPanelStatus(container, { force = false } = {}) {
             const extensionManifestBundleEnabled = config.extensionManifestBundleEnabled !== false;
             const characterListEnabled = config.characterListAccelerationEnabled !== false;
             const recentChatListEnabled = config.recentChatListAccelerationEnabled !== false;
-            const progressiveChatLoadingEnabled = config.progressiveChatLoadingEnabled === true;
+            const progressiveChatLoadingEnabled = false;
             const tokenizerBulkCountEnabled = config.tokenizerBulkCountEnabled !== false;
             panelState.cache = {
                 ...(panelState.cache || {}),
@@ -2955,7 +2971,7 @@ async function refreshBaibaokuPanelStatus(container, { force = false } = {}) {
             extensionManifestBundleToggle.prop('checked', extensionManifestBundleEnabled);
             characterListToggle.prop('checked', characterListEnabled);
             recentChatListToggle.prop('checked', recentChatListEnabled);
-            progressiveChatLoadingToggle.prop('checked', progressiveChatLoadingEnabled);
+            progressiveChatLoadingToggle.prop('checked', false).prop('disabled', true);
             tokenizerBulkCountToggle.prop('checked', tokenizerBulkCountEnabled);
             applyFastChatGetOptimization();
             if (typeof bridge?.setSettingsAccelerationEnabled === 'function') {
