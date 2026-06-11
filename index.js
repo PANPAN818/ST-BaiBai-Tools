@@ -28,7 +28,7 @@ import * as presetOptimizations from './presetOptimizations.js';
 
 const LOG_PREFIX = '[柏宝箱]';
 const MODULE_NAME = getModuleName();
-const CURRENT_VERSION = '0.25.2';
+const CURRENT_VERSION = '0.25.3';
 const EXTENSION_ID = getExtensionId();
 const SETTINGS_KEY = 'baiBaiToolkit';
 const EXTENSION_KEY = '__baiBaiToolkitExtensionInstalled';
@@ -54,8 +54,8 @@ const SAVE_GENERATE_PATH = '/api/backends/chat-completions/generate';
 const SAVE_GENERATE_SAVE_PATH = '/api/chats/save';
 const SAVE_GENERATE_STATUS_HEADER = 'x-baibaoku-save-generate-status';
 const SAVE_GENERATE_JOB_ID_HEADER = 'x-baibaoku-save-generate-job-id';
-const SAVE_GENERATE_POLL_INTERVAL_MS = 500;
-const SAVE_GENERATE_POLL_TIMEOUT_MS = 90_000;
+const SAVE_GENERATE_POLL_INTERVAL_MS = 1000;
+const SAVE_GENERATE_POLL_TIMEOUT_MS = 30 * 60_000;
 const SAVE_GENERATE_RESUME_CHECK_DELAY_MS = 250;
 const SAVE_GENERATE_RESUME_CHECK_COOLDOWN_MS = 1500;
 const SAVE_GENERATE_INTENT_TTL_MS = 120_000;
@@ -11797,12 +11797,23 @@ function findMatchingSaveGenerateRecord(state, saveBody) {
 }
 
 async function waitSaveGenerateJobTerminal(state, record, { onUpdate = null } = {}) {
-    const terminal = new Set(['completed', 'saved', 'already_saved', 'conflict', 'failed', 'canceled']);
-    if (terminal.has(record.status)) {
+    if (isSaveGenerateTerminalStatus(record.status)) {
         onUpdate?.({ id: record.id, status: record.status });
         return { id: record.id, status: record.status };
     }
 
+    const streamedJob = await waitSaveGenerateJobTerminalEventStream(state, record, { onUpdate }).catch(error => {
+        console.debug(`${LOG_PREFIX} save-generate event stream failed; falling back to polling`, error);
+        return null;
+    });
+    if (streamedJob && isSaveGenerateTerminalStatus(streamedJob.status)) {
+        return streamedJob;
+    }
+
+    return waitSaveGenerateJobTerminalPolling(state, record, { onUpdate });
+}
+
+async function waitSaveGenerateJobTerminalPolling(state, record, { onUpdate = null } = {}) {
     const deadline = Date.now() + SAVE_GENERATE_POLL_TIMEOUT_MS;
     while (Date.now() < deadline) {
         const job = await fetchSaveGenerateJobStatus(state.originalFetch, record.id).catch(error => {
@@ -11815,7 +11826,7 @@ async function waitSaveGenerateJobTerminal(state, record, { onUpdate = null } = 
             onUpdate?.(job);
         }
 
-        if (job && terminal.has(job.status)) {
+        if (job && isSaveGenerateTerminalStatus(job.status)) {
             return job;
         }
 
@@ -11823,6 +11834,114 @@ async function waitSaveGenerateJobTerminal(state, record, { onUpdate = null } = 
     }
 
     return { id: record.id, status: 'timeout' };
+}
+
+async function waitSaveGenerateJobTerminalEventStream(state, record, { onUpdate = null } = {}) {
+    if (!state?.originalFetch || !record?.id || typeof TextDecoder === 'undefined') {
+        return null;
+    }
+
+    const headers = new Headers(getRequestHeaders());
+    const response = await state.originalFetch(`${BAIBAOKU_SAVE_GENERATE_URL}/${encodeURIComponent(record.id)}/events`, {
+        method: 'GET',
+        headers,
+        cache: 'no-store',
+    });
+
+    if (response.status === 404 || response.status === 405 || response.status === 501) {
+        return null;
+    }
+    if (!response.ok || !response.body || typeof response.body.getReader !== 'function') {
+        throw new Error(`HTTP ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let latestJob = null;
+
+    const processBlock = block => {
+        const event = parseSaveGenerateEventStreamBlock(block);
+        if (!event.data) {
+            return null;
+        }
+
+        let payload = null;
+        try {
+            payload = JSON.parse(event.data);
+        } catch {
+            return null;
+        }
+
+        if (!payload?.status) {
+            return null;
+        }
+
+        latestJob = payload;
+        record.status = payload.status;
+        onUpdate?.(payload);
+        return payload;
+    };
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+                break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, '\n');
+
+            let separator = buffer.indexOf('\n\n');
+            while (separator >= 0) {
+                const block = buffer.slice(0, separator);
+                buffer = buffer.slice(separator + 2);
+                const job = processBlock(block);
+                if (job && isSaveGenerateTerminalStatus(job.status)) {
+                    return job;
+                }
+                separator = buffer.indexOf('\n\n');
+            }
+        }
+
+        buffer += decoder.decode();
+        if (buffer.trim()) {
+            const job = processBlock(buffer);
+            if (job && isSaveGenerateTerminalStatus(job.status)) {
+                return job;
+            }
+        }
+    } finally {
+        reader.releaseLock?.();
+    }
+
+    return latestJob && isSaveGenerateTerminalStatus(latestJob.status) ? latestJob : null;
+}
+
+function parseSaveGenerateEventStreamBlock(block) {
+    const event = {
+        type: 'message',
+        data: '',
+    };
+    const dataLines = [];
+    for (const rawLine of String(block || '').split('\n')) {
+        const line = rawLine.replace(/\r$/, '');
+        if (!line || line.startsWith(':')) {
+            continue;
+        }
+
+        const separator = line.indexOf(':');
+        const field = separator >= 0 ? line.slice(0, separator) : line;
+        const value = separator >= 0 ? line.slice(separator + 1).replace(/^ /, '') : '';
+        if (field === 'event') {
+            event.type = value || 'message';
+        } else if (field === 'data') {
+            dataLines.push(value);
+        }
+    }
+    event.data = dataLines.join('\n');
+    return event;
 }
 
 function watchLocalSaveGenerateTerminalStatus(state, jobId) {
@@ -12037,7 +12156,10 @@ async function runCurrentSaveGenerateJobCheck(state, chatId, reason = 'unknown',
         const effectiveLastMessageHash = typeof lastMessageHash === 'string'
             ? lastMessageHash
             : getCurrentSaveGenerateLastMessageHash();
-        const job = await fetchSaveGenerateJobByChatId(state.originalFetch, chatId, effectiveLastMessageHash).catch(error => {
+        const job = await fetchSaveGenerateJobByChatId(state.originalFetch, chatId, {
+            lastMessageHash: effectiveLastMessageHash,
+            lastMessageInfo: getCurrentSaveGenerateLastMessageInfo(),
+        }).catch(error => {
             console.debug(`${LOG_PREFIX} save-generate resume check failed`, error);
             return null;
         });
@@ -12334,11 +12456,15 @@ function markSaveGenerateLocalJobConsumed(state, jobId) {
     cleanupSaveGenerateRecords(state);
 }
 
-async function fetchSaveGenerateJobByChatId(fetchFn, chatId, lastMessageHash = '') {
+async function fetchSaveGenerateJobByChatId(fetchFn, chatId, { lastMessageHash = '', lastMessageInfo = null } = {}) {
     const headers = new Headers(getRequestHeaders());
     const query = new URLSearchParams({ chatId });
     if (lastMessageHash) {
         query.set('lastMessageHash', lastMessageHash);
+    }
+    if (lastMessageInfo && Number.isInteger(lastMessageInfo.floor) && lastMessageInfo.floor >= 0) {
+        query.set('lastMessageFloor', String(lastMessageInfo.floor));
+        query.set('lastMessageRole', lastMessageInfo.role || '');
     }
     const response = await fetchFn(`${BAIBAOKU_SAVE_GENERATE_URL}/pending?${query.toString()}`, {
         method: 'GET',
@@ -12353,8 +12479,20 @@ async function fetchSaveGenerateJobByChatId(fetchFn, chatId, lastMessageHash = '
 }
 
 function getCurrentSaveGenerateLastMessageHash() {
+    return getCurrentSaveGenerateLastMessageInfo().hash;
+}
+
+function getCurrentSaveGenerateLastMessageInfo() {
     const tail = getCurrentSaveGenerateChatTailMessage();
-    return tail?.message ? makeSaveGenerateMessageContentHash(tail.message.mes ?? '', tail.floor) : '';
+    if (!tail?.message) {
+        return { hash: '', floor: -1, role: '' };
+    }
+
+    return {
+        hash: makeSaveGenerateMessageContentHash(tail.message.mes ?? '', tail.floor),
+        floor: tail.floor,
+        role: tail.message.is_user === true ? 'user' : 'assistant',
+    };
 }
 
 function makeSaveGenerateMessageContentHash(value, floor) {
@@ -12878,7 +13016,11 @@ function isCurrentSaveGenerateMessageAlreadyInserted(job) {
 
     const savedFloor = Number.isInteger(job.savedMessageFloor) ? job.savedMessageFloor : -1;
     const tail = getCurrentSaveGenerateChatTailMessage();
-    if (tail?.message && Number.isInteger(savedFloor) && savedFloor >= 0 && tail.floor > savedFloor) {
+    if (tail?.message
+        && tail.message.is_user !== true
+        && Number.isInteger(savedFloor)
+        && savedFloor >= 0
+        && tail.floor >= savedFloor) {
         return true;
     }
 
