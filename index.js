@@ -28,7 +28,7 @@ import * as presetOptimizations from './presetOptimizations.js';
 
 const LOG_PREFIX = '[柏宝箱]';
 const MODULE_NAME = getModuleName();
-const CURRENT_VERSION = '0.25';
+const CURRENT_VERSION = '0.25.1';
 const EXTENSION_ID = getExtensionId();
 const SETTINGS_KEY = 'baiBaiToolkit';
 const EXTENSION_KEY = '__baiBaiToolkitExtensionInstalled';
@@ -11766,7 +11766,7 @@ function installSaveGenerateRecoveryInputBlocker(state) {
 }
 
 function shouldBlockSaveGenerateUserInput(state, chatId) {
-    return Boolean(getSaveGenerateRecoveryLock(state, chatId) || isSaveGenerateResumeCheckPendingForChat(state, chatId));
+    return Boolean(getSaveGenerateRecoveryLock(state, chatId));
 }
 
 async function maybeBlockSaveGenerateRequestForRecovery(state, requestInfo) {
