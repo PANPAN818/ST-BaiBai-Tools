@@ -416,7 +416,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    padding: 0.35em 0.6em;
+    padding: 10px 7px;
     border: 0;
     border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent);
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 75%, transparent);
@@ -444,7 +444,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     min-width: 0;
     overflow: hidden;
     white-space: normal;
-    font-size: calc(var(--mainFontSize) * 0.88);
+    font-size: calc(var(--mainFontSize) * 1);
 }
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-actions {
@@ -609,7 +609,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     grid-template-columns: minmax(0, 1fr) auto !important;
     align-items: center !important;
     box-sizing: border-box !important;
-    padding: 0.35em 0.6em !important;
+    padding: 10px 7px !important;
     border: 0 !important;
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 75%, transparent) !important;
     cursor: grabbing !important;
@@ -625,7 +625,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     min-width: 0 !important;
     overflow: hidden !important;
     white-space: normal !important;
-    font-size: calc(var(--mainFontSize) * 0.88) !important;
+    font-size: calc(var(--mainFontSize) * 1) !important;
 }
 
 .bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-title strong {
