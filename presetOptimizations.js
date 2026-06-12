@@ -412,7 +412,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    padding: 0.22em 0.45em;
+    padding: 0.35em 0.6em;
     border: 0;
     border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent);
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 75%, transparent);
@@ -430,11 +430,11 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     min-width: 0;
     overflow: hidden;
     white-space: normal;
-    font-size: calc(var(--mainFontSize) * 0.92);
+    font-size: calc(var(--mainFontSize) * 0.88);
 }
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-actions {
-    gap: 2px;
+    gap: 3px;
 }
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-toggle,
@@ -595,7 +595,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     grid-template-columns: minmax(0, 1fr) auto !important;
     align-items: center !important;
     box-sizing: border-box !important;
-    padding: 0.22em 0.45em !important;
+    padding: 0.35em 0.6em !important;
     border: 0 !important;
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 75%, transparent) !important;
 }
@@ -608,7 +608,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     min-width: 0 !important;
     overflow: hidden !important;
     white-space: normal !important;
-    font-size: calc(var(--mainFontSize) * 0.92) !important;
+    font-size: calc(var(--mainFontSize) * 0.88) !important;
 }
 
 .bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-title strong {
@@ -623,7 +623,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     display: flex !important;
     justify-content: flex-end !important;
     align-items: center !important;
-    gap: 2px !important;
+    gap: 3px !important;
 }
 
 .bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-toggle,
