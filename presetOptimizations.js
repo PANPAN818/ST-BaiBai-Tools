@@ -27,6 +27,7 @@ const PRESET_VUE_LIST_MANAGER_KEY = '__baiBaiToolkitPresetVueListManager';
 const PRESET_VUE_LIST_RENDER_PATCH_KEY = '__baiBaiToolkitPresetVueListRenderPatch';
 const PRESET_VUE_LIST_HOST_CLASS = 'bai-bai-preset-vue-list-host';
 const PRESET_VUE_DRAGGING_BODY_CLASS = 'bai-bai-preset-vue-dragging';
+const PRESET_VUE_LIST_GAP_VARIABLE = '--bai-bai-preset-list-gap';
 const PRESET_VUE_MODULE_PATH = './vendor/vue.esm-browser.prod.js';
 const PRESET_VUE_DRAGGABLE_MODULE_PATH = './vendor/vue-draggable-next.esm-browser.prod.js';
 const PRESET_VUE_HEADER_ENTRY_ID = '__bai_bai_preset_header';
@@ -319,10 +320,12 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group {
     display: flex;
     flex-direction: column;
-    gap: inherit;
+    gap: 0;
     padding: 0;
-    border: 0;
-    background: transparent;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 45%, transparent);
+    overflow: hidden;
     transition: gap ${PRESET_VUE_EXPAND_ANIMATION_MS}ms ease, opacity ${PRESET_VUE_EXPAND_ANIMATION_MS}ms ease;
 }
 
@@ -336,8 +339,13 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     grid-template-columns: minmax(0, 1fr) auto minmax(2em, auto);
     align-items: center;
     padding: 0.35em 0.5em;
-    border: 1px solid var(--SmartThemeBorderColor);
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 80%, transparent);
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent);
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 75%, transparent);
+}
+
+#completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-collapsed .bai-bai-preset-group-header {
+    border-bottom-color: transparent;
 }
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-title {
@@ -388,9 +396,9 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-list {
     display: flex;
     flex-direction: column;
-    gap: inherit;
+    gap: var(${PRESET_VUE_LIST_GAP_VARIABLE}, 6px);
     margin: 0;
-    padding: 0;
+    padding: var(${PRESET_VUE_LIST_GAP_VARIABLE}, 6px);
     list-style: none;
     min-height: 0;
     overflow: hidden;
@@ -551,9 +559,27 @@ function preparePromptManagerCustomDragList(list = document.querySelector(PRESET
 
     disablePromptManagerStockSortable(list);
     list.classList.add(PRESET_DRAG_READY_CLASS);
+    syncPresetVuePromptListGapVariable(list);
     list.querySelectorAll('li.completion_prompt_manager_prompt .drag-handle')
         .forEach(handle => handle.classList.add('ui-sortable-handle'));
     return true;
+}
+
+function syncPresetVuePromptListGapVariable(list) {
+    if (!(list instanceof HTMLElement)) {
+        return;
+    }
+
+    const styles = getComputedStyle(list);
+    const gap = styles.rowGap && styles.rowGap !== 'normal'
+        ? styles.rowGap
+        : styles.gap;
+
+    if (gap && gap !== 'normal') {
+        list.style.setProperty(PRESET_VUE_LIST_GAP_VARIABLE, gap);
+    } else {
+        list.style.removeProperty(PRESET_VUE_LIST_GAP_VARIABLE);
+    }
 }
 
 function clearPromptManagerCustomDragList() {
