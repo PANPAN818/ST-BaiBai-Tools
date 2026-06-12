@@ -676,12 +676,126 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     cursor: grabbing !important;
 }
 
+.${PRESET_DRAG_CLONE_CLASS}.completion_prompt_manager_prompt,
+.bai-bai-preset-vue-sortable-ghost.completion_prompt_manager_prompt,
+.bai-bai-preset-vue-sortable-fallback.completion_prompt_manager_prompt,
+.bai-bai-preset-vue-sortable-drag.completion_prompt_manager_prompt {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) max-content max-content !important;
+    column-gap: 6px !important;
+    align-items: center !important;
+    padding-left: 20px !important;
+    list-style: none !important;
+    list-style-type: none !important;
+}
+
+.${PRESET_DRAG_CLONE_CLASS}.completion_prompt_manager_prompt::marker,
+.bai-bai-preset-vue-sortable-ghost.completion_prompt_manager_prompt::marker,
+.bai-bai-preset-vue-sortable-fallback.completion_prompt_manager_prompt::marker,
+.bai-bai-preset-vue-sortable-drag.completion_prompt_manager_prompt::marker {
+    content: "" !important;
+    font-size: 0 !important;
+}
+
+.${PRESET_DRAG_CLONE_CLASS} .prompt_manager_prompt_controls,
+.bai-bai-preset-vue-sortable-ghost .prompt_manager_prompt_controls,
+.bai-bai-preset-vue-sortable-fallback .prompt_manager_prompt_controls,
+.bai-bai-preset-vue-sortable-drag .prompt_manager_prompt_controls {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    flex-direction: row !important;
+    gap: 4px !important;
+    flex-wrap: nowrap !important;
+    white-space: nowrap !important;
+    min-inline-size: max-content !important;
+}
+
+.${PRESET_DRAG_CLONE_CLASS} .drag-handle,
+.bai-bai-preset-vue-sortable-ghost .drag-handle,
+.bai-bai-preset-vue-sortable-fallback .drag-handle,
+.bai-bai-preset-vue-sortable-drag .drag-handle {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    height: 100% !important;
+    padding: 0 5px !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+.${PRESET_DRAG_CLONE_CLASS} .completion_prompt_manager_prompt_name,
+.bai-bai-preset-vue-sortable-ghost .completion_prompt_manager_prompt_name,
+.bai-bai-preset-vue-sortable-fallback .completion_prompt_manager_prompt_name,
+.bai-bai-preset-vue-sortable-drag .completion_prompt_manager_prompt_name {
+    min-width: 0 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+}
+
+.${PRESET_DRAG_CLONE_CLASS} .bai-bai-preset-prompt-icon-button,
+.${PRESET_DRAG_CLONE_CLASS} .bai-bai-preset-prompt-action-button,
+.bai-bai-preset-vue-sortable-ghost .bai-bai-preset-prompt-icon-button,
+.bai-bai-preset-vue-sortable-ghost .bai-bai-preset-prompt-action-button,
+.bai-bai-preset-vue-sortable-fallback .bai-bai-preset-prompt-icon-button,
+.bai-bai-preset-vue-sortable-fallback .bai-bai-preset-prompt-action-button,
+.bai-bai-preset-vue-sortable-drag .bai-bai-preset-prompt-icon-button,
+.bai-bai-preset-vue-sortable-drag .bai-bai-preset-prompt-action-button {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex: 0 0 calc(var(--mainFontSize) * 1.65) !important;
+    inline-size: calc(var(--mainFontSize) * 1.65) !important;
+    block-size: calc(var(--mainFontSize) * 1.65) !important;
+    min-inline-size: calc(var(--mainFontSize) * 1.65) !important;
+    min-block-size: calc(var(--mainFontSize) * 1.65) !important;
+    box-sizing: border-box !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: calc(var(--mainFontSize) * 1) !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+}
+
+.${PRESET_DRAG_CLONE_CLASS}.completion_prompt_manager_prompt:not(.completion_prompt_manager_prompt_disabled) .prompt-manager-toggle-action,
+.bai-bai-preset-vue-sortable-ghost.completion_prompt_manager_prompt:not(.completion_prompt_manager_prompt_disabled) .prompt-manager-toggle-action,
+.bai-bai-preset-vue-sortable-fallback.completion_prompt_manager_prompt:not(.completion_prompt_manager_prompt_disabled) .prompt-manager-toggle-action,
+.bai-bai-preset-vue-sortable-drag.completion_prompt_manager_prompt:not(.completion_prompt_manager_prompt_disabled) .prompt-manager-toggle-action {
+    color: var(--SmartThemeQuoteColor) !important;
+}
+
+.${PRESET_DRAG_CLONE_CLASS} .prompt_manager_prompt_tokens,
+.bai-bai-preset-vue-sortable-ghost .prompt_manager_prompt_tokens,
+.bai-bai-preset-vue-sortable-fallback .prompt_manager_prompt_tokens,
+.bai-bai-preset-vue-sortable-drag .prompt_manager_prompt_tokens {
+    inline-size: max-content !important;
+    min-inline-size: 2.2em !important;
+    width: auto !important;
+    justify-self: end !important;
+    text-align: right !important;
+    font-size: calc(var(--mainFontSize) * 0.9) !important;
+}
+
 .${PRESET_DRAG_CLONE_CLASS} .bai-bai-preset-prompt-actions,
 .bai-bai-preset-vue-sortable-ghost .bai-bai-preset-prompt-actions,
 .bai-bai-preset-vue-sortable-fallback .bai-bai-preset-prompt-actions,
 .bai-bai-preset-vue-sortable-drag .bai-bai-preset-prompt-actions {
     display: none !important;
     opacity: 0 !important;
+}
+
+.${PRESET_DRAG_CLONE_CLASS} .prompt-manager-remove-action,
+.${PRESET_DRAG_CLONE_CLASS} .prompt-manager-copy-action,
+.bai-bai-preset-vue-sortable-ghost .prompt-manager-remove-action,
+.bai-bai-preset-vue-sortable-ghost .prompt-manager-copy-action,
+.bai-bai-preset-vue-sortable-fallback .prompt-manager-remove-action,
+.bai-bai-preset-vue-sortable-fallback .prompt-manager-copy-action,
+.bai-bai-preset-vue-sortable-drag .prompt-manager-remove-action,
+.bai-bai-preset-vue-sortable-drag .prompt-manager-copy-action {
+    display: none !important;
 }
 
 .${PRESET_DRAG_CLONE_CLASS} .bai-bai-preset-prompt-actions-hint,
