@@ -35,6 +35,7 @@ const PRESET_VUE_SEPARATOR_ENTRY_ID = '__bai_bai_preset_separator';
 const PRESET_VUE_EXPAND_ANIMATION_MS = 180;
 const PRESET_VUE_COLLAPSE_ANIMATION_MS = 260;
 const PRESET_VUE_DRAG_ANIMATION_MS = 180;
+const PRESET_VUE_DROP_SAVE_DELAY_MS = 40;
 const PRESET_DRAG_LONG_PRESS_MS = 300;
 const PRESET_DRAG_CANCEL_DISTANCE_PX = 12;
 const PRESET_DRAG_CLICK_SUPPRESS_MS = 500;
@@ -372,10 +373,6 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     opacity: 0.65;
 }
 
-#completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-row-group-start {
-    cursor: pointer;
-}
-
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-body {
     display: grid;
     grid-template-rows: 1fr;
@@ -473,6 +470,68 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
 
 .bai-bai-preset-vue-sortable-ghost {
     opacity: 0.35;
+}
+
+.bai-bai-preset-vue-sortable-ghost.bai-bai-preset-group .bai-bai-preset-group-body {
+    visibility: hidden !important;
+}
+
+.bai-bai-preset-vue-sortable-fallback.bai-bai-preset-group {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0 !important;
+    box-sizing: border-box !important;
+    padding: 0 !important;
+    border: 1px solid var(--SmartThemeBorderColor) !important;
+    border-radius: 8px !important;
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 45%, transparent) !important;
+    overflow: hidden !important;
+    height: auto !important;
+    min-height: 0 !important;
+}
+
+.bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto minmax(2em, auto) !important;
+    align-items: center !important;
+    box-sizing: border-box !important;
+    padding: 0.35em 0.5em !important;
+    border: 0 !important;
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 75%, transparent) !important;
+}
+
+.bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-title {
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+}
+
+.bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-title strong {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+.bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-actions {
+    display: flex !important;
+    justify-content: flex-end !important;
+    gap: 4px !important;
+}
+
+.bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-toggle {
+    flex: 0 0 auto !important;
+    width: 1.4em !important;
+    justify-content: center !important;
+}
+
+.bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-count {
+    opacity: 0.65 !important;
+}
+
+.bai-bai-preset-vue-sortable-fallback.bai-bai-preset-group .bai-bai-preset-group-body {
+    display: none !important;
 }
 
 .bai-bai-preset-vue-sortable-chosen,
@@ -694,6 +753,7 @@ function removePresetVuePromptListManager({ skipRestore = false } = {}) {
     manager.enabled = false;
     clearTimeout(manager.syncTimer);
     manager.syncTimer = null;
+    clearPresetVuePromptOrderSaveSchedule(manager);
     document.body?.classList.remove(PRESET_VUE_DRAGGING_BODY_CLASS);
 
     removePresetVuePromptListRenderPatch();
@@ -709,6 +769,8 @@ function removePresetVuePromptListManager({ skipRestore = false } = {}) {
 }
 
 function unmountPresetVuePromptListApp(manager = getPresetVuePromptListManagerState()) {
+    clearPresetVuePromptOrderSaveSchedule(manager);
+
     if (manager.app) {
         try {
             manager.app.unmount();
@@ -736,6 +798,8 @@ function getPresetVuePromptListManagerState() {
             draggableModulePromise: null,
             installing: null,
             syncTimer: null,
+            saveTimer: null,
+            saveFrame: null,
             dragSnapshot: null,
             enabled: false,
         };
@@ -984,8 +1048,80 @@ function syncPresetVuePromptListManagerState() {
         return false;
     }
 
+    repairPresetPromptOrderDuplicatesIfNeeded();
+    repairPresetPromptGroupStateIfNeeded();
     manager.state.items = buildPresetVuePromptListItems();
     manager.state.renderKey += 1;
+    return true;
+}
+
+function repairPresetPromptOrderDuplicatesIfNeeded() {
+    if (!isPromptManagerReadyForCustomDrag()) {
+        return false;
+    }
+
+    const promptOrder = promptManager.getPromptOrderForCharacter(promptManager.activeCharacter) ?? [];
+    const seenPromptIds = new Set();
+    const repairedPromptOrder = [];
+    let changed = false;
+
+    for (const entry of promptOrder) {
+        const identifier = entry?.identifier;
+
+        if (!identifier) {
+            changed = true;
+            continue;
+        }
+
+        if (seenPromptIds.has(identifier)) {
+            changed = true;
+            continue;
+        }
+
+        seenPromptIds.add(identifier);
+        repairedPromptOrder.push(entry);
+    }
+
+    if (!changed) {
+        return false;
+    }
+
+    promptManager.removePromptOrderForCharacter(promptManager.activeCharacter);
+    promptManager.addPromptOrderForCharacter(promptManager.activeCharacter, repairedPromptOrder);
+    void Promise.resolve(promptManager.saveServiceSettings()).catch(error => {
+        console.debug(`${LOG_PREFIX} Failed to repair duplicated preset prompt order`, error);
+    });
+    return true;
+}
+
+function repairPresetPromptGroupStateIfNeeded() {
+    if (!isPromptManagerReadyForCustomDrag()) {
+        return false;
+    }
+
+    const groupState = getPresetPromptGroupState();
+    const validPromptIds = new Set(
+        (promptManager.getPromptOrderForCharacter(promptManager.activeCharacter) ?? [])
+            .map(entry => entry?.identifier)
+            .filter(Boolean),
+    );
+    const before = JSON.stringify({
+        groups: groupState.groups,
+        prompts: groupState.prompts,
+    });
+
+    normalizePresetPromptGroupState(groupState, validPromptIds);
+
+    const after = JSON.stringify({
+        groups: groupState.groups,
+        prompts: groupState.prompts,
+    });
+
+    if (before === after) {
+        return false;
+    }
+
+    savePresetPromptGroupSettings();
     return true;
 }
 
@@ -1158,7 +1294,7 @@ function renderPresetVuePromptDraggable(h, vueDraggableNext, model) {
         onEnd: () => {
             setPresetVuePromptDragging(model, false);
             if (consumePresetVuePromptDragChange(model)) {
-                savePresetVuePromptOrderFromModelSafely();
+                schedulePresetVuePromptOrderSaveAfterDrop();
             }
         },
     };
@@ -1179,8 +1315,13 @@ function isPresetVuePromptTopLevelDragMoveAllowed(event) {
 
     const dragged = event?.draggedContext?.element;
     const futureIndex = Number(event?.draggedContext?.futureIndex);
+    const to = event?.to;
 
     if (dragged?.type !== 'prompt' && dragged?.type !== 'group') {
+        return false;
+    }
+
+    if (dragged.type === 'group' && !(to instanceof HTMLElement && to.id === PRESET_PROMPT_MANAGER_LIST_SELECTOR.slice(1))) {
         return false;
     }
 
@@ -1200,6 +1341,10 @@ function isPresetVuePromptGroupDragMoveAllowed(event) {
     return dragged?.type === 'prompt';
 }
 
+function canPutPresetVuePromptIntoGroupList(to, from, dragElement) {
+    return dragElement instanceof HTMLElement && dragElement.matches('li.completion_prompt_manager_prompt_draggable');
+}
+
 function capturePresetVuePromptDragSnapshot(model) {
     getPresetVuePromptListManagerState().dragSnapshot = getPresetVuePromptListSnapshot(model);
 }
@@ -1213,8 +1358,10 @@ function consumePresetVuePromptDragChange(model) {
         return false;
     }
 
+    const sanitized = sanitizePresetVuePromptListModel(model);
     const current = getPresetVuePromptListSnapshot(model);
-    return !areStringArraysEqual(snapshot.order, current.order)
+    return sanitized
+        || !areStringArraysEqual(snapshot.order, current.order)
         || !arePresetVuePromptGroupAssignmentsEqual(snapshot.assignments, current.assignments);
 }
 
@@ -1262,7 +1409,7 @@ function renderPresetVuePromptGroup(h, vueDraggableNext, item) {
         group: {
             name: 'bai-bai-preset-prompts',
             pull: true,
-            put: true,
+            put: canPutPresetVuePromptIntoGroupList,
         },
         draggable: 'li.completion_prompt_manager_prompt_draggable',
         filter: PRESET_DRAG_INTERACTIVE_SELECTOR,
@@ -1286,7 +1433,7 @@ function renderPresetVuePromptGroup(h, vueDraggableNext, item) {
             const model = getPresetVuePromptListManagerState().state;
             setPresetVuePromptDragging(model, false);
             if (consumePresetVuePromptDragChange(model)) {
-                savePresetVuePromptOrderFromModelSafely();
+                schedulePresetVuePromptOrderSaveAfterDrop();
             }
         },
     };
@@ -1517,6 +1664,7 @@ function getPresetPromptGroupState() {
 }
 
 function normalizePresetPromptGroupState(groupState, validPromptIds = null) {
+    const seenGroupIds = new Set();
     groupState.groups = groupState.groups
         .filter(group => group && typeof group === 'object' && group.id)
         .map((group, index) => ({
@@ -1526,6 +1674,14 @@ function normalizePresetPromptGroupState(groupState, validPromptIds = null) {
             collapsed: Boolean(group.collapsed),
         }))
         .sort((a, b) => a.order - b.order)
+        .filter(group => {
+            if (seenGroupIds.has(group.id)) {
+                return false;
+            }
+
+            seenGroupIds.add(group.id);
+            return true;
+        })
         .map((group, index) => ({ ...group, order: index }));
 
     const validGroupIds = new Set(groupState.groups.map(group => group.id));
@@ -1685,7 +1841,19 @@ async function finishPresetVuePromptGroupRangeSelection(model) {
 }
 
 function getPresetVuePromptFlatIds(model = getPresetVuePromptListManagerState().state) {
-    return getPresetVuePromptItemsFromModel(model).map(item => item.id);
+    const seenPromptIds = new Set();
+    const promptIds = [];
+
+    for (const item of getPresetVuePromptItemsFromModel(model)) {
+        if (!item?.id || seenPromptIds.has(item.id)) {
+            continue;
+        }
+
+        seenPromptIds.add(item.id);
+        promptIds.push(item.id);
+    }
+
+    return promptIds;
 }
 
 function getPresetVuePromptItemsFromModel(model = getPresetVuePromptListManagerState().state) {
@@ -1703,6 +1871,87 @@ function getPresetVuePromptItemsFromModel(model = getPresetVuePromptListManagerS
     }
 
     return promptItems;
+}
+
+function sanitizePresetVuePromptListModel(model) {
+    if (!Array.isArray(model?.items)) {
+        return false;
+    }
+
+    const nextItems = [];
+    const seenPromptIds = new Set();
+    const seenStaticIds = new Set();
+    const groupById = new Map();
+    let changed = false;
+
+    const pushPromptOnce = (promptItem, targetItems) => {
+        if (!promptItem?.id || promptItem.type !== 'prompt') {
+            changed = true;
+            return;
+        }
+
+        if (seenPromptIds.has(promptItem.id)) {
+            changed = true;
+            return;
+        }
+
+        seenPromptIds.add(promptItem.id);
+        targetItems.push(promptItem);
+    };
+
+    for (const item of model.items) {
+        if (item?.type === 'header' || item?.type === 'separator') {
+            if (seenStaticIds.has(item.type)) {
+                changed = true;
+                continue;
+            }
+
+            seenStaticIds.add(item.type);
+            nextItems.push(item);
+            continue;
+        }
+
+        if (item?.type === 'prompt') {
+            pushPromptOnce(item, nextItems);
+            continue;
+        }
+
+        if (item?.type === 'group') {
+            const children = Array.isArray(item.children) ? [...item.children] : [];
+
+            if (!item.groupId) {
+                changed = true;
+                continue;
+            }
+
+            let groupItem = groupById.get(item.groupId);
+
+            if (!groupItem) {
+                groupItem = item;
+                groupItem.children = [];
+                groupById.set(item.groupId, groupItem);
+                nextItems.push(groupItem);
+            } else {
+                changed = true;
+            }
+
+            for (const child of children) {
+                pushPromptOnce(child, groupItem.children);
+            }
+
+            groupItem.count = groupItem.children.length;
+            continue;
+        }
+
+        changed = true;
+    }
+
+    if (!changed && nextItems.length === model.items.length) {
+        return false;
+    }
+
+    model.items = nextItems;
+    return true;
 }
 
 function getPresetVuePromptRangeIds(model, { includeHover = false } = {}) {
@@ -1838,22 +2087,7 @@ function renderPresetVuePromptControls(h, prompt, item) {
             ? false
             : !(promptManager.configuration.toggleDisabled ?? []).includes(prompt.identifier)
     );
-    const selecting = Boolean(getPresetVuePromptListManagerState().state?.rangeSelection?.active);
-    const controls = [];
-
-    if (!selecting) {
-        controls.push(h('span', {
-            title: t`从这里创建分组`,
-            class: 'bai-bai-preset-row-group-start fa-solid fa-folder-plus fa-xs',
-            onClick: event => {
-                event.preventDefault();
-                event.stopPropagation();
-                void startPresetVuePromptGroupRangeSelection(getPresetVuePromptListManagerState().state, { startId: item.id });
-            },
-        }));
-    }
-
-    controls.push(
+    return [
         canDelete
             ? h('span', {
                 title: 'Remove',
@@ -1874,9 +2108,39 @@ function renderPresetVuePromptControls(h, prompt, item) {
                 ],
             })
             : h('span', { class: 'fa-solid' }),
-    );
+    ];
+}
 
-    return controls;
+function schedulePresetVuePromptOrderSaveAfterDrop() {
+    const manager = getPresetVuePromptListManagerState();
+    clearPresetVuePromptOrderSaveSchedule(manager);
+
+    const scheduleTimer = () => {
+        manager.saveFrame = null;
+        manager.saveTimer = setTimeout(() => {
+            manager.saveTimer = null;
+            savePresetVuePromptOrderFromModelSafely();
+        }, PRESET_VUE_DROP_SAVE_DELAY_MS);
+    };
+
+    if (typeof requestAnimationFrame === 'function') {
+        manager.saveFrame = requestAnimationFrame(scheduleTimer);
+    } else {
+        scheduleTimer();
+    }
+}
+
+function clearPresetVuePromptOrderSaveSchedule(manager = getPresetVuePromptListManagerState()) {
+    if (manager.saveFrame !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(manager.saveFrame);
+    }
+
+    if (manager.saveTimer !== null) {
+        clearTimeout(manager.saveTimer);
+    }
+
+    manager.saveFrame = null;
+    manager.saveTimer = null;
 }
 
 function savePresetVuePromptOrderFromModelSafely() {
@@ -1893,6 +2157,11 @@ async function savePresetVuePromptOrderFromModel() {
     }
 
     const manager = getPresetVuePromptListManagerState();
+    if (!manager.state) {
+        return;
+    }
+
+    sanitizePresetVuePromptListModel(manager.state);
     const promptOrder = promptManager.getPromptOrderForCharacter(promptManager.activeCharacter) ?? [];
     const beforeOrder = promptOrder.map(entry => entry?.identifier).filter(Boolean);
     const nextAssignments = getPresetVuePromptGroupAssignmentsFromModel(manager.state);
@@ -1924,14 +2193,14 @@ function getPresetVuePromptGroupAssignmentsFromModel(model) {
     for (const item of model?.items ?? []) {
         if (item?.type === 'group') {
             for (const child of item.children ?? []) {
-                if (child?.type === 'prompt') {
+                if (child?.type === 'prompt' && !Object.prototype.hasOwnProperty.call(assignments, child.id)) {
                     assignments[child.id] = item.groupId;
                 }
             }
             continue;
         }
 
-        if (item?.type === 'prompt') {
+        if (item?.type === 'prompt' && !Object.prototype.hasOwnProperty.call(assignments, item.id)) {
             assignments[item.id] = null;
         }
     }
