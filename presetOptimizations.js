@@ -387,6 +387,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-actions {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
     gap: 4px;
 }
 
@@ -411,7 +412,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    padding: 0.35em 0.5em;
+    padding: 0.22em 0.45em;
     border: 0;
     border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent);
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 75%, transparent);
@@ -429,31 +430,35 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     min-width: 0;
     overflow: hidden;
     white-space: normal;
-    font-size: var(--mainFontSize);
+    font-size: calc(var(--mainFontSize) * 0.92);
+}
+
+#completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-actions {
+    gap: 2px;
 }
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-toggle,
-#completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-enable-toggle {
+#completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-action-button {
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
-    flex: 0 0 calc(var(--mainFontSize) * 2) !important;
-    inline-size: calc(var(--mainFontSize) * 2) !important;
-    block-size: calc(var(--mainFontSize) * 2) !important;
-    min-inline-size: calc(var(--mainFontSize) * 2) !important;
-    min-block-size: calc(var(--mainFontSize) * 2) !important;
+    flex: 0 0 calc(var(--mainFontSize) * 1.65) !important;
+    inline-size: calc(var(--mainFontSize) * 1.65) !important;
+    block-size: calc(var(--mainFontSize) * 1.65) !important;
+    min-inline-size: calc(var(--mainFontSize) * 1.65) !important;
+    min-block-size: calc(var(--mainFontSize) * 1.65) !important;
     box-sizing: border-box !important;
     border: 0 !important;
     box-shadow: none !important;
     background: transparent !important;
     margin: 0 !important;
     padding: 0 !important;
-    font-size: var(--mainFontSize) !important;
+    font-size: calc(var(--mainFontSize) * 0.9) !important;
     line-height: 1 !important;
 }
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-enable-toggle {
-    font-size: calc(var(--mainFontSize) * 1.2) !important;
+    font-size: calc(var(--mainFontSize) * 1.05) !important;
 }
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-title strong {
@@ -587,10 +592,10 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
 
 .bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-header {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) auto minmax(2em, auto) !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
     align-items: center !important;
     box-sizing: border-box !important;
-    padding: 0.35em 0.5em !important;
+    padding: 0.22em 0.45em !important;
     border: 0 !important;
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 75%, transparent) !important;
 }
@@ -603,7 +608,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     min-width: 0 !important;
     overflow: hidden !important;
     white-space: normal !important;
-    font-size: var(--mainFontSize) !important;
+    font-size: calc(var(--mainFontSize) * 0.92) !important;
 }
 
 .bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-title strong {
@@ -617,31 +622,32 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
 .bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-actions {
     display: flex !important;
     justify-content: flex-end !important;
-    gap: 4px !important;
+    align-items: center !important;
+    gap: 2px !important;
 }
 
 .bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-toggle,
-.bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-enable-toggle {
+.bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-action-button {
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
-    flex: 0 0 calc(var(--mainFontSize) * 2) !important;
-    inline-size: calc(var(--mainFontSize) * 2) !important;
-    block-size: calc(var(--mainFontSize) * 2) !important;
-    min-inline-size: calc(var(--mainFontSize) * 2) !important;
-    min-block-size: calc(var(--mainFontSize) * 2) !important;
+    flex: 0 0 calc(var(--mainFontSize) * 1.65) !important;
+    inline-size: calc(var(--mainFontSize) * 1.65) !important;
+    block-size: calc(var(--mainFontSize) * 1.65) !important;
+    min-inline-size: calc(var(--mainFontSize) * 1.65) !important;
+    min-block-size: calc(var(--mainFontSize) * 1.65) !important;
     box-sizing: border-box !important;
     border: 0 !important;
     box-shadow: none !important;
     background: transparent !important;
     margin: 0 !important;
     padding: 0 !important;
-    font-size: var(--mainFontSize) !important;
+    font-size: calc(var(--mainFontSize) * 0.9) !important;
     line-height: 1 !important;
 }
 
 .bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-enable-toggle {
-    font-size: calc(var(--mainFontSize) * 1.2) !important;
+    font-size: calc(var(--mainFontSize) * 1.05) !important;
 }
 
 .bai-bai-preset-vue-sortable-fallback .bai-bai-preset-group-count {
@@ -1659,6 +1665,7 @@ function renderPresetVuePromptGroup(h, vueDraggableNext, item) {
                     class: [
                         'menu_button',
                         'fa-solid',
+                        'bai-bai-preset-group-action-button',
                         'bai-bai-preset-group-enable-toggle',
                         groupFullyEnabled ? 'fa-toggle-on' : 'fa-toggle-off',
                     ],
@@ -1670,7 +1677,7 @@ function renderPresetVuePromptGroup(h, vueDraggableNext, item) {
                     },
                 }),
                 h('span', {
-                    class: 'menu_button fa-solid fa-pencil',
+                    class: 'menu_button fa-solid fa-pencil bai-bai-preset-group-action-button',
                     title: t`重命名分组`,
                     onClick: event => {
                         event.preventDefault();
@@ -1679,7 +1686,7 @@ function renderPresetVuePromptGroup(h, vueDraggableNext, item) {
                     },
                 }),
                 h('span', {
-                    class: 'menu_button fa-solid fa-trash',
+                    class: 'menu_button fa-solid fa-trash bai-bai-preset-group-action-button',
                     title: t`删除分组`,
                     onClick: event => {
                         event.preventDefault();
