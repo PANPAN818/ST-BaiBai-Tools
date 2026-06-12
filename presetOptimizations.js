@@ -1,5 +1,6 @@
 import { event_types, eventSource, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
 import { oai_settings, openai_setting_names, promptManager } from '../../../openai.js';
+import { getPresetManager } from '../../../preset-manager.js';
 import { getTokenizerModel } from '../../../tokenizers.js';
 import { t } from '../../../i18n.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
@@ -32,6 +33,8 @@ const PRESET_VUE_MODULE_PATH = './vendor/vue.esm-browser.prod.js';
 const PRESET_VUE_DRAGGABLE_MODULE_PATH = './vendor/vue-draggable-next.esm-browser.prod.js';
 const PRESET_VUE_HEADER_ENTRY_ID = '__bai_bai_preset_header';
 const PRESET_VUE_SEPARATOR_ENTRY_ID = '__bai_bai_preset_separator';
+const PRESET_GROUP_EXTENSION_PATH = 'baibaiToolkit.presetPromptGroups';
+const PRESET_COMPAT_ENTRY_GROUPING_EXTENSION_PATH = 'entryGrouping';
 const PRESET_VUE_EXPAND_ANIMATION_MS = 180;
 const PRESET_VUE_COLLAPSE_ANIMATION_MS = 260;
 const PRESET_VUE_DRAG_ANIMATION_MS = 180;
@@ -1132,6 +1135,7 @@ function syncPresetVuePromptListManagerState() {
 
     repairPresetPromptOrderDuplicatesIfNeeded();
     repairPresetPromptGroupStateIfNeeded();
+    syncCurrentPresetPromptGroupStateToPresetExtensionField();
     manager.state.items = buildPresetVuePromptListItems();
     manager.state.renderKey += 1;
     return true;
@@ -1724,6 +1728,18 @@ function getPresetPromptGroupScopeKey() {
     return `openai::${presetName}`;
 }
 
+function clearEmptyPresetPromptGroupScope(scopeKey = getPresetPromptGroupScopeKey()) {
+    const root = getPresetPromptGroupsRoot();
+    const state = root.scopes?.[scopeKey];
+
+    if (!state || hasPresetPromptGroupStateData(state)) {
+        return false;
+    }
+
+    delete root.scopes[scopeKey];
+    return true;
+}
+
 function getPresetPromptGroupState() {
     const root = getPresetPromptGroupsRoot();
     const scopeKey = getPresetPromptGroupScopeKey();
@@ -1742,7 +1758,39 @@ function getPresetPromptGroupState() {
         state.prompts = {};
     }
 
+    hydratePresetPromptGroupStateFromPresetExtension(state);
     return state;
+}
+
+function hydratePresetPromptGroupStateFromPresetExtension(state) {
+    if (hasPresetPromptGroupStateData(state)) {
+        return false;
+    }
+
+    const validPromptIds = getCurrentPresetPromptOrderIds();
+    const importedState = readCurrentPresetPromptGroupExtensionState(validPromptIds)
+        ?? convertCompatEntryGroupingToPresetPromptGroupState(
+            readCurrentPresetExtensionField(PRESET_COMPAT_ENTRY_GROUPING_EXTENSION_PATH),
+            validPromptIds,
+        );
+
+    if (!importedState || !hasPresetPromptGroupStateData(importedState)) {
+        return false;
+    }
+
+    state.groups = importedState.groups;
+    state.prompts = importedState.prompts;
+    normalizePresetPromptGroupState(state, new Set(validPromptIds));
+    savePresetPromptGroupSettings();
+    return true;
+}
+
+function hasPresetPromptGroupStateData(state) {
+    return Boolean(
+        Array.isArray(state?.groups) && state.groups.length > 0
+        && state?.prompts && typeof state.prompts === 'object'
+        && Object.keys(state.prompts).length > 0,
+    );
 }
 
 function normalizePresetPromptGroupState(groupState, validPromptIds = null) {
@@ -1786,14 +1834,203 @@ function normalizePresetPromptGroupState(groupState, validPromptIds = null) {
     groupState.prompts = normalizedPrompts;
 }
 
+function readCurrentPresetPromptGroupExtensionState(validPromptIds = getCurrentPresetPromptOrderIds()) {
+    const value = readCurrentPresetExtensionField(PRESET_GROUP_EXTENSION_PATH);
+
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    const groupState = {
+        groups: Array.isArray(value.groups) ? structuredClone(value.groups) : [],
+        prompts: value.prompts && typeof value.prompts === 'object' ? structuredClone(value.prompts) : {},
+    };
+
+    normalizePresetPromptGroupState(groupState, new Set(validPromptIds));
+    return hasPresetPromptGroupStateData(groupState) ? groupState : null;
+}
+
+function convertCompatEntryGroupingToPresetPromptGroupState(entryGrouping, promptIds = getCurrentPresetPromptOrderIds()) {
+    if (!Array.isArray(entryGrouping) || !promptIds.length) {
+        return null;
+    }
+
+    const validPromptIds = new Set(promptIds);
+    const groupState = {
+        groups: [],
+        prompts: {},
+    };
+    const assignedPromptIds = new Set();
+
+    for (const [index, entry] of entryGrouping.entries()) {
+        if (!entry || typeof entry !== 'object') {
+            continue;
+        }
+
+        const startIndex = promptIds.indexOf(entry.startIdentifier);
+        const endIndex = promptIds.indexOf(entry.endIdentifier);
+
+        if (startIndex < 0 || endIndex < 0) {
+            continue;
+        }
+
+        const exclusive = String(entry.mode || 'inclusive').toLowerCase() === 'exclusive';
+        const from = Math.min(startIndex, endIndex) + (exclusive ? 1 : 0);
+        const to = Math.max(startIndex, endIndex) - (exclusive ? 1 : 0);
+
+        if (from > to) {
+            continue;
+        }
+
+        const groupId = String(entry.id || uuidv4());
+        groupState.groups.push({
+            id: groupId,
+            name: String(entry.name || t`未命名分组`),
+            order: index,
+            collapsed: Boolean(entry.collapsed),
+        });
+
+        for (const promptId of promptIds.slice(from, to + 1)) {
+            if (!validPromptIds.has(promptId) || assignedPromptIds.has(promptId)) {
+                continue;
+            }
+
+            assignedPromptIds.add(promptId);
+            groupState.prompts[promptId] = { groupId };
+        }
+    }
+
+    normalizePresetPromptGroupState(groupState, validPromptIds);
+    return hasPresetPromptGroupStateData(groupState) ? groupState : null;
+}
+
+function getCurrentPresetPromptOrderIds() {
+    return (promptManager?.getPromptOrderForCharacter?.(promptManager.activeCharacter) ?? [])
+        .map(entry => entry?.identifier)
+        .filter(Boolean);
+}
+
+function readCurrentPresetExtensionField(path) {
+    const presetName = oai_settings?.preset_settings_openai;
+    const presetManager = getPresetManager('openai');
+    const settingsValue = getObjectPath(oai_settings?.extensions, path);
+
+    if (settingsValue !== null && settingsValue !== undefined) {
+        return settingsValue;
+    }
+
+    if (presetManager && presetName) {
+        const preset = presetManager.getCompletionPresetByName?.(presetName);
+        const presetValue = getObjectPath(preset?.extensions, path);
+
+        if (presetValue !== null && presetValue !== undefined) {
+            return presetValue;
+        }
+    }
+
+    return null;
+}
+
+function getObjectPath(source, path) {
+    if (!source || typeof source !== 'object') {
+        return null;
+    }
+
+    return String(path || '')
+        .split('.')
+        .filter(Boolean)
+        .reduce((value, key) => (value && typeof value === 'object' ? value[key] : undefined), source) ?? null;
+}
+
+function setObjectPath(target, path, value) {
+    if (!target || typeof target !== 'object') {
+        return;
+    }
+
+    const parts = String(path || '').split('.').filter(Boolean);
+    let cursor = target;
+
+    for (let index = 0; index < parts.length - 1; index++) {
+        const key = parts[index];
+
+        if (!cursor[key] || typeof cursor[key] !== 'object') {
+            cursor[key] = {};
+        }
+
+        cursor = cursor[key];
+    }
+
+    cursor[parts[parts.length - 1]] = value;
+}
+
 function savePresetPromptGroupSettings() {
     getPresetPromptGroupsRoot();
+    syncCurrentPresetPromptGroupStateToPresetExtensionField();
 
     if (typeof savePresetOptimizationSettings === 'function') {
         savePresetOptimizationSettings();
     } else {
         saveSettingsDebounced();
     }
+}
+
+function syncCurrentPresetPromptGroupStateToPresetExtensionField({ force = false } = {}) {
+    const presetName = oai_settings?.preset_settings_openai;
+    const presetManager = getPresetManager('openai');
+
+    if (!presetName) {
+        return false;
+    }
+
+    const promptIds = getCurrentPresetPromptOrderIds();
+
+    if (!promptIds.length) {
+        return false;
+    }
+
+    const groupState = getSerializableCurrentPresetPromptGroupState(promptIds);
+    const existingPresetGroupState = readCurrentPresetExtensionField(PRESET_GROUP_EXTENSION_PATH);
+
+    if (!hasPresetPromptGroupStateData(groupState) && !existingPresetGroupState) {
+        return false;
+    }
+
+    const serialized = JSON.stringify(groupState);
+
+    if (!force && extensionState.presetPromptGroupExtensionSyncKey === `${presetName}:${serialized}`) {
+        return false;
+    }
+
+    extensionState.presetPromptGroupExtensionSyncKey = `${presetName}:${serialized}`;
+    oai_settings.extensions = oai_settings.extensions && typeof oai_settings.extensions === 'object'
+        ? oai_settings.extensions
+        : {};
+    setObjectPath(oai_settings.extensions, PRESET_GROUP_EXTENSION_PATH, groupState);
+
+    if (!presetManager) {
+        return false;
+    }
+
+    void presetManager.writePresetExtensionField({
+        name: presetName,
+        path: PRESET_GROUP_EXTENSION_PATH,
+        value: groupState,
+    }).catch(error => {
+        console.debug(`${LOG_PREFIX} Failed to save preset prompt groups to preset extension field`, error);
+    });
+    return true;
+}
+
+function getSerializableCurrentPresetPromptGroupState(promptIds = getCurrentPresetPromptOrderIds()) {
+    const groupState = getPresetPromptGroupState();
+    const serializable = {
+        version: 1,
+        groups: structuredClone(groupState.groups ?? []),
+        prompts: structuredClone(groupState.prompts ?? {}),
+    };
+
+    normalizePresetPromptGroupState(serializable, new Set(promptIds));
+    return serializable;
 }
 
 async function startPresetVuePromptGroupRangeSelection(model, { startId = null } = {}) {
@@ -3417,6 +3654,7 @@ function handlePresetListActionClick(event) {
 
 async function handleOpenAiPresetChangedBefore(event) {
     extensionState.openAiPresetSwitchEarlyRendered = false;
+    clearEmptyPresetPromptGroupScope(`openai::${event?.presetName ?? oai_settings?.preset_settings_openai ?? 'current'}`);
 
     if (!settings.presetSwitchOptimizationEnabled || !isPromptManagerReadyForFastPresetSwitch()) {
         return;
@@ -3441,7 +3679,12 @@ async function handleOpenAiPresetChangedBefore(event) {
 }
 
 async function handleOpenAiPresetChangedAfter() {
+    clearEmptyPresetPromptGroupScope();
+
     if (!settings.presetSwitchOptimizationEnabled || !isPromptManagerReadyForFastPresetSwitch()) {
+        if (isPresetGroupingEnabled()) {
+            syncPresetVuePromptListManagerState();
+        }
         return;
     }
 
@@ -3452,6 +3695,9 @@ async function handleOpenAiPresetChangedAfter() {
         }
 
         suppressPromptManagerDebouncedRender();
+        if (isPresetGroupingEnabled()) {
+            syncPresetVuePromptListManagerState();
+        }
         refreshPromptManagerTokensAfterPresetSwitchDebounced();
     } catch (error) {
         console.debug(`${LOG_PREFIX} Failed to fast-render prompt manager after preset switch`, error);
