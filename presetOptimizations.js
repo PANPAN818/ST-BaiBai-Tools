@@ -1,5 +1,5 @@
 import { event_types, eventSource, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { getChatCompletionPreset, oai_settings, openai_setting_names, openai_settings, promptManager } from '../../../openai.js';
+import { oai_settings, openai_setting_names, promptManager } from '../../../openai.js';
 import { getPresetManager } from '../../../preset-manager.js';
 import { getTokenizerModel } from '../../../tokenizers.js';
 import { t } from '../../../i18n.js';
@@ -7111,34 +7111,113 @@ async function saveOpenAiPresetAfterPromptEdit() {
     }
 
     await flushPendingPresetPromptChanges();
-    await saveCurrentOpenAiPresetAfterPromptEdit();
+    await triggerOpenAiPresetUpdateAndWait();
     clearPendingPresetPromptChanges();
     return true;
 }
 
-async function saveCurrentOpenAiPresetAfterPromptEdit() {
-    const presetName = oai_settings?.preset_settings_openai;
-    const presetManager = getPresetManager('openai');
-
-    if (!presetName || !presetManager || typeof presetManager.savePreset !== 'function') {
-        $(OPENAI_PRESET_UPDATE_SELECTOR).trigger('click');
-        await waitForOpenAiPresetUpdateClickFallback();
-        return;
-    }
-
-    const presetBody = getChatCompletionPreset(oai_settings);
-    await presetManager.savePreset(presetName, presetBody, { skipUpdate: true });
-
-    const presetIndex = openai_setting_names?.[presetName];
-    if (presetIndex !== undefined && openai_settings?.[presetIndex]) {
-        Object.assign(openai_settings[presetIndex], presetBody);
-    }
-
-    toastr.success(t`Preset updated`);
+async function triggerOpenAiPresetUpdateAndWait() {
+    const waitForSave = waitForOpenAiPresetUpdateRequest(oai_settings?.preset_settings_openai);
+    $(OPENAI_PRESET_UPDATE_SELECTOR).trigger('click');
+    await waitForSave;
 }
 
-function waitForOpenAiPresetUpdateClickFallback() {
-    return new Promise(resolve => setTimeout(resolve, 500));
+function waitForOpenAiPresetUpdateRequest(presetName) {
+    if (typeof globalThis.fetch !== 'function') {
+        return waitForOpenAiPresetUpdateFallback();
+    }
+
+    const originalFetch = globalThis.fetch;
+    let captured = false;
+    let settled = false;
+    let timeout = 0;
+
+    return new Promise((resolve, reject) => {
+        const cleanup = () => {
+            if (globalThis.fetch === patchedFetch) {
+                globalThis.fetch = originalFetch;
+            }
+
+            if (timeout) {
+                clearTimeout(timeout);
+                timeout = 0;
+            }
+        };
+
+        const settle = (handler, value) => {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            cleanup();
+            handler(value);
+        };
+
+        const patchedFetch = function (...args) {
+            const result = originalFetch.apply(this, args);
+
+            if (!captured && isOpenAiPresetSaveRequest(args[0], args[1], presetName)) {
+                captured = true;
+                Promise.resolve(result)
+                    .then(response => {
+                        if (response?.ok) {
+                            settle(resolve, true);
+                            return;
+                        }
+
+                        settle(reject, new Error('OpenAI preset update request failed'));
+                    })
+                    .catch(error => settle(reject, error));
+            }
+
+            return result;
+        };
+
+        globalThis.fetch = patchedFetch;
+        timeout = setTimeout(() => settle(resolve, false), 1200);
+    });
+}
+
+function isOpenAiPresetSaveRequest(resource, init, presetName) {
+    const url = typeof resource === 'string'
+        ? resource
+        : typeof resource?.url === 'string'
+            ? resource.url
+            : '';
+
+    if (!url.includes('/api/presets/save')) {
+        return false;
+    }
+
+    const method = String(init?.method || resource?.method || 'GET').toUpperCase();
+    if (method !== 'POST') {
+        return false;
+    }
+
+    if (typeof init?.body !== 'string') {
+        return true;
+    }
+
+    try {
+        const payload = JSON.parse(init.body);
+
+        if (payload?.apiId && payload.apiId !== 'openai') {
+            return false;
+        }
+
+        if (presetName && payload?.name && payload.name !== presetName) {
+            return false;
+        }
+    } catch {
+        return true;
+    }
+
+    return true;
+}
+
+function waitForOpenAiPresetUpdateFallback() {
+    return new Promise(resolve => setTimeout(resolve, 1200));
 }
 
 function updatePromptToggleRow(row, toggle, isEnabled) {
