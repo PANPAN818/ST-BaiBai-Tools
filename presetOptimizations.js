@@ -1,5 +1,5 @@
 import { event_types, eventSource, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { oai_settings, openai_setting_names, promptManager } from '../../../openai.js';
+import { getChatCompletionPreset, oai_settings, openai_setting_names, openai_settings, promptManager } from '../../../openai.js';
 import { getPresetManager } from '../../../preset-manager.js';
 import { getTokenizerModel } from '../../../tokenizers.js';
 import { t } from '../../../i18n.js';
@@ -7105,12 +7105,40 @@ function scheduleOpenAiPresetSaveAfterPromptEdit() {
     }, 0);
 }
 
-function saveOpenAiPresetAfterPromptEdit() {
+async function saveOpenAiPresetAfterPromptEdit() {
     if (!settings.presetAutoSaveAfterPromptEditEnabled) {
+        return false;
+    }
+
+    await flushPendingPresetPromptChanges();
+    await saveCurrentOpenAiPresetAfterPromptEdit();
+    clearPendingPresetPromptChanges();
+    return true;
+}
+
+async function saveCurrentOpenAiPresetAfterPromptEdit() {
+    const presetName = oai_settings?.preset_settings_openai;
+    const presetManager = getPresetManager('openai');
+
+    if (!presetName || !presetManager || typeof presetManager.savePreset !== 'function') {
+        $(OPENAI_PRESET_UPDATE_SELECTOR).trigger('click');
+        await waitForOpenAiPresetUpdateClickFallback();
         return;
     }
 
-    $(OPENAI_PRESET_UPDATE_SELECTOR).trigger('click');
+    const presetBody = getChatCompletionPreset(oai_settings);
+    await presetManager.savePreset(presetName, presetBody, { skipUpdate: true });
+
+    const presetIndex = openai_setting_names?.[presetName];
+    if (presetIndex !== undefined && openai_settings?.[presetIndex]) {
+        Object.assign(openai_settings[presetIndex], presetBody);
+    }
+
+    toastr.success(t`Preset updated`);
+}
+
+function waitForOpenAiPresetUpdateClickFallback() {
+    return new Promise(resolve => setTimeout(resolve, 500));
 }
 
 function updatePromptToggleRow(row, toggle, isEnabled) {
