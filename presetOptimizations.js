@@ -21,6 +21,7 @@ const PRESET_MODEL_CHANGE_HANDLER_KEY = '__baiBaiToolkitPresetModelChangeHandler
 const PRESET_CHAT_LOADED_HANDLER_KEY = '__baiBaiToolkitPresetChatLoadedHandler';
 const PRESET_GROUP_PRESET_DELETED_HANDLER_KEY = '__baiBaiToolkitPresetGroupPresetDeletedHandler';
 const PRESET_GROUP_PRESET_IMPORT_HANDLER_KEY = '__baiBaiToolkitPresetGroupPresetImportHandler';
+const PRESET_GROUP_PRESET_RENAMED_HANDLER_KEY = '__baiBaiToolkitPresetGroupPresetRenamedHandler';
 const PRESET_SELECT_CHANGE_HANDLER_KEY = '__baiBaiToolkitPresetSelectChangeHandler';
 const PRESET_DELETE_HANDLER_KEY = '__baiBaiToolkitPresetDeleteHandler';
 const PRESET_LIST_ACTION_HANDLER_KEY = '__baiBaiToolkitPresetListActionHandler';
@@ -312,6 +313,7 @@ function applyPresetDragOptimization() {
 
 function applyPresetGrouping() {
     installPresetExportPendingChangesGuard();
+    applyPresetGroupRenameCleanup();
 
     if (!isPresetGroupingEnabled()) {
         flushPendingPresetPromptChangesSafely();
@@ -579,6 +581,23 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     column-gap: 6px !important;
 }
 
+#completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} li.completion_prompt_manager_prompt .completion_prompt_manager_prompt_name {
+    min-width: 0 !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+}
+
+#completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} li.completion_prompt_manager_prompt .prompt-manager-inspect-action {
+    display: inline;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+}
+
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} li.completion_prompt_manager_list_head {
     grid-template-columns: minmax(0, 1fr) max-content !important;
     align-items: center !important;
@@ -607,6 +626,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     flex-wrap: nowrap !important;
     white-space: nowrap !important;
     min-inline-size: max-content !important;
+    filter: none !important;
 }
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-prompt-icon-button,
@@ -629,6 +649,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     line-height: 1 !important;
     cursor: pointer !important;
     white-space: nowrap !important;
+    filter: none !important;
 }
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-prompt-actions-hint-hidden {
@@ -647,6 +668,7 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
     white-space: nowrap !important;
     opacity: 0;
     transition: opacity var(--animation-duration-2x, 160ms) ease-in-out;
+    filter: none !important;
 }
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-prompt-actions-visible {
@@ -656,6 +678,10 @@ ${PRESET_PROMPT_MANAGER_LIST_SELECTOR}.${PRESET_DRAG_ACTIVE_CLASS} li.completion
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-prompt-action-button.caution {
     color: var(--SmartThemeEmColor) !important;
+}
+
+#completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-prompt-action-button[data-preset-prompt-action="delete"] {
+    color: #ff4d4f !important;
 }
 
 #completion_prompt_manager ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .prompt-manager-remove-action,
@@ -6066,6 +6092,7 @@ function applyPresetSwitchOptimization() {
     applyPresetListActionDelegation();
     applyPresetGroupDeletedCleanup();
     applyPresetGroupImportCleanup();
+    applyPresetGroupRenameCleanup();
     applyPresetSwitchBeforeOptimization();
     applyPresetModelChangeTokenRefreshOptimization();
     applyPresetChatLoadedTokenRefreshOptimization();
@@ -6122,6 +6149,94 @@ function applyPresetGroupImportCleanup() {
 
     extensionState[PRESET_GROUP_PRESET_IMPORT_HANDLER_KEY] = handler;
     eventSource.on(event_types.OAI_PRESET_IMPORT_READY, handler);
+}
+
+function applyPresetGroupRenameCleanup() {
+    if (
+        extensionState[PRESET_GROUP_PRESET_RENAMED_HANDLER_KEY]
+        || !event_types.PRESET_RENAMED_BEFORE
+        || !event_types.PRESET_RENAMED
+    ) {
+        return;
+    }
+
+    const beforeHandler = event => handlePresetPromptGroupRenamedBefore(event);
+    const renamedHandler = event => {
+        handlePresetPromptGroupRenamed(event);
+    };
+
+    extensionState[PRESET_GROUP_PRESET_RENAMED_HANDLER_KEY] = { beforeHandler, renamedHandler };
+    eventSource.on(event_types.PRESET_RENAMED_BEFORE, beforeHandler);
+    eventSource.on(event_types.PRESET_RENAMED, renamedHandler);
+}
+
+async function handlePresetPromptGroupRenamedBefore(event) {
+    if (event?.apiId !== 'openai' || !event.oldName || !event.newName || !isPresetGroupingEnabled()) {
+        return;
+    }
+
+    try {
+        await flushScheduledPresetVuePromptOrderSave();
+        if (extensionState.presetPromptGroupRuntimePresetName === event.oldName) {
+            syncCurrentPresetPromptGroupStateToPresetExtensionField({ force: true, persist: false });
+        }
+    } catch (error) {
+        console.debug(`${LOG_PREFIX} Failed to prepare preset prompt groups before preset rename`, error);
+    }
+}
+
+function handlePresetPromptGroupRenamed(event) {
+    if (event?.apiId !== 'openai' || !event.oldName || !event.newName || !isPresetGroupingEnabled()) {
+        return;
+    }
+
+    migratePendingPresetPromptSavesAfterRename(event.oldName, event.newName);
+
+    if (extensionState.presetPromptGroupRuntimePresetName === event.oldName) {
+        extensionState.presetPromptGroupRuntimePresetName = event.newName;
+    } else if (extensionState.presetPromptGroupRuntimePresetName === event.newName) {
+        resetPresetPromptGroupRuntimeState(event.newName);
+    }
+
+    delete extensionState.presetPromptGroupExtensionSyncKey;
+
+    if (isPresetVuePromptListManagerActive()) {
+        syncPresetVuePromptListManagerState();
+        preparePromptManagerCustomDragList(getPromptManagerListElement());
+    } else {
+        schedulePresetVuePromptListManagerSync(0);
+    }
+}
+
+function migratePendingPresetPromptSavesAfterRename(oldName, newName) {
+    const manager = getPresetVuePromptListManagerState();
+    migratePendingPresetPromptSaveMapAfterRename(getPendingPresetPromptServiceSaves(manager), oldName, newName);
+    migratePendingPresetPromptSaveMapAfterRename(getPendingPresetPromptGroupSaves(manager), oldName, newName);
+}
+
+function migratePendingPresetPromptSaveMapAfterRename(map, oldName, newName) {
+    if (!(map instanceof Map) || !map.has(oldName)) {
+        return false;
+    }
+
+    const entry = map.get(oldName);
+    map.delete(oldName);
+
+    if (!entry || typeof entry !== 'object') {
+        return false;
+    }
+
+    const migratedEntry = {
+        ...entry,
+        presetName: newName,
+    };
+
+    if (migratedEntry.groupState) {
+        migratedEntry.syncKey = `${newName}:${JSON.stringify(migratedEntry.groupState)}`;
+    }
+
+    map.set(newName, migratedEntry);
+    return true;
 }
 
 function collapseImportedPresetPromptGroups(presetData) {
