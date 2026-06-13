@@ -21,6 +21,7 @@ const PRESET_MODEL_CHANGE_HANDLER_KEY = '__baiBaiToolkitPresetModelChangeHandler
 const PRESET_CHAT_LOADED_HANDLER_KEY = '__baiBaiToolkitPresetChatLoadedHandler';
 const PRESET_GROUP_PRESET_DELETED_HANDLER_KEY = '__baiBaiToolkitPresetGroupPresetDeletedHandler';
 const PRESET_GROUP_PRESET_IMPORT_HANDLER_KEY = '__baiBaiToolkitPresetGroupPresetImportHandler';
+const PRESET_GROUP_PRESET_RENAMED_HANDLER_KEY = '__baiBaiToolkitPresetGroupPresetRenamedHandler';
 const PRESET_SELECT_CHANGE_HANDLER_KEY = '__baiBaiToolkitPresetSelectChangeHandler';
 const PRESET_DELETE_HANDLER_KEY = '__baiBaiToolkitPresetDeleteHandler';
 const PRESET_LIST_ACTION_HANDLER_KEY = '__baiBaiToolkitPresetListActionHandler';
@@ -312,6 +313,7 @@ function applyPresetDragOptimization() {
 
 function applyPresetGrouping() {
     installPresetExportPendingChangesGuard();
+    applyPresetGroupRenameCleanup();
 
     if (!isPresetGroupingEnabled()) {
         flushPendingPresetPromptChangesSafely();
@@ -6083,6 +6085,7 @@ function applyPresetSwitchOptimization() {
     applyPresetListActionDelegation();
     applyPresetGroupDeletedCleanup();
     applyPresetGroupImportCleanup();
+    applyPresetGroupRenameCleanup();
     applyPresetSwitchBeforeOptimization();
     applyPresetModelChangeTokenRefreshOptimization();
     applyPresetChatLoadedTokenRefreshOptimization();
@@ -6139,6 +6142,94 @@ function applyPresetGroupImportCleanup() {
 
     extensionState[PRESET_GROUP_PRESET_IMPORT_HANDLER_KEY] = handler;
     eventSource.on(event_types.OAI_PRESET_IMPORT_READY, handler);
+}
+
+function applyPresetGroupRenameCleanup() {
+    if (
+        extensionState[PRESET_GROUP_PRESET_RENAMED_HANDLER_KEY]
+        || !event_types.PRESET_RENAMED_BEFORE
+        || !event_types.PRESET_RENAMED
+    ) {
+        return;
+    }
+
+    const beforeHandler = event => handlePresetPromptGroupRenamedBefore(event);
+    const renamedHandler = event => {
+        handlePresetPromptGroupRenamed(event);
+    };
+
+    extensionState[PRESET_GROUP_PRESET_RENAMED_HANDLER_KEY] = { beforeHandler, renamedHandler };
+    eventSource.on(event_types.PRESET_RENAMED_BEFORE, beforeHandler);
+    eventSource.on(event_types.PRESET_RENAMED, renamedHandler);
+}
+
+async function handlePresetPromptGroupRenamedBefore(event) {
+    if (event?.apiId !== 'openai' || !event.oldName || !event.newName || !isPresetGroupingEnabled()) {
+        return;
+    }
+
+    try {
+        await flushScheduledPresetVuePromptOrderSave();
+        if (extensionState.presetPromptGroupRuntimePresetName === event.oldName) {
+            syncCurrentPresetPromptGroupStateToPresetExtensionField({ force: true, persist: false });
+        }
+    } catch (error) {
+        console.debug(`${LOG_PREFIX} Failed to prepare preset prompt groups before preset rename`, error);
+    }
+}
+
+function handlePresetPromptGroupRenamed(event) {
+    if (event?.apiId !== 'openai' || !event.oldName || !event.newName || !isPresetGroupingEnabled()) {
+        return;
+    }
+
+    migratePendingPresetPromptSavesAfterRename(event.oldName, event.newName);
+
+    if (extensionState.presetPromptGroupRuntimePresetName === event.oldName) {
+        extensionState.presetPromptGroupRuntimePresetName = event.newName;
+    } else if (extensionState.presetPromptGroupRuntimePresetName === event.newName) {
+        resetPresetPromptGroupRuntimeState(event.newName);
+    }
+
+    delete extensionState.presetPromptGroupExtensionSyncKey;
+
+    if (isPresetVuePromptListManagerActive()) {
+        syncPresetVuePromptListManagerState();
+        preparePromptManagerCustomDragList(getPromptManagerListElement());
+    } else {
+        schedulePresetVuePromptListManagerSync(0);
+    }
+}
+
+function migratePendingPresetPromptSavesAfterRename(oldName, newName) {
+    const manager = getPresetVuePromptListManagerState();
+    migratePendingPresetPromptSaveMapAfterRename(getPendingPresetPromptServiceSaves(manager), oldName, newName);
+    migratePendingPresetPromptSaveMapAfterRename(getPendingPresetPromptGroupSaves(manager), oldName, newName);
+}
+
+function migratePendingPresetPromptSaveMapAfterRename(map, oldName, newName) {
+    if (!(map instanceof Map) || !map.has(oldName)) {
+        return false;
+    }
+
+    const entry = map.get(oldName);
+    map.delete(oldName);
+
+    if (!entry || typeof entry !== 'object') {
+        return false;
+    }
+
+    const migratedEntry = {
+        ...entry,
+        presetName: newName,
+    };
+
+    if (migratedEntry.groupState) {
+        migratedEntry.syncKey = `${newName}:${JSON.stringify(migratedEntry.groupState)}`;
+    }
+
+    map.set(newName, migratedEntry);
+    return true;
 }
 
 function collapseImportedPresetPromptGroups(presetData) {

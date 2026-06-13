@@ -145,6 +145,7 @@ const REGEX_QUICK_OPERATION_IMPORT_HANDLER_KEY = '__baiBaiToolkitRegexQuickOpera
 const REGEX_PENDING_CHANGES_LIFECYCLE_HANDLER_KEY = '__baiBaiToolkitRegexPendingChangesLifecycleHandler';
 const REGEX_VUE_MANAGER_CLICK_HANDLER_KEY = '__baiBaiToolkitRegexVueManagerClickHandler';
 const REGEX_VUE_SCOPED_CONTEXT_HANDLER_KEY = '__baiBaiToolkitRegexVueScopedContextHandler';
+const REGEX_VUE_PRESET_RENAME_HANDLER_KEY = '__baiBaiToolkitRegexVuePresetRenameHandler';
 const REGEX_VUE_NATIVE_RENDER_GUARD_KEY = '__baiBaiToolkitRegexVueNativeRenderGuard';
 const REGEX_VUE_MANAGER_ROOT_ID = 'bai_bai_toolkit_regex_vue_manager_root';
 const REGEX_VUE_MANAGER_STYLE_ID = 'bai_bai_toolkit_regex_vue_manager_style';
@@ -4656,6 +4657,7 @@ function installRegexQuickOperationOptimization() {
     installRegexPendingChangesLifecycleGuard();
     installRegexVueManagerActionHandler();
     installRegexVueScopedContextHandler();
+    installRegexVuePresetRenameHandler();
     scheduleNativeRegexSortableGuard();
     void installRegexVueManager();
 }
@@ -4685,6 +4687,7 @@ function removeRegexQuickOperationOptimization() {
     removeRegexPendingChangesLifecycleGuard();
     removeRegexVueNativeRenderGuard();
     removeRegexVueScopedContextHandler();
+    removeRegexVuePresetRenameHandler();
     removeOptimizedRegexImportHandler();
     removeRegexVueManagerActionHandler();
     removeRegexVueManager();
@@ -4832,6 +4835,128 @@ function removeRegexVueScopedContextHandler() {
     eventSource.removeListener(event_types.PRESET_CHANGED, presetHandler);
     eventSource.removeListener(event_types.OAI_PRESET_CHANGED_AFTER, presetHandler);
     delete extensionState[REGEX_VUE_SCOPED_CONTEXT_HANDLER_KEY];
+}
+
+function installRegexVuePresetRenameHandler() {
+    if (extensionState[REGEX_VUE_PRESET_RENAME_HANDLER_KEY] || !event_types.PRESET_RENAMED) {
+        return;
+    }
+
+    const handler = event => {
+        handleRegexVuePresetRenamed(event);
+    };
+
+    extensionState[REGEX_VUE_PRESET_RENAME_HANDLER_KEY] = handler;
+    eventSource.on(event_types.PRESET_RENAMED, handler);
+}
+
+function removeRegexVuePresetRenameHandler() {
+    const handler = extensionState[REGEX_VUE_PRESET_RENAME_HANDLER_KEY];
+
+    if (!handler) {
+        return;
+    }
+
+    eventSource.removeListener(event_types.PRESET_RENAMED, handler);
+    delete extensionState[REGEX_VUE_PRESET_RENAME_HANDLER_KEY];
+}
+
+function handleRegexVuePresetRenamed(event) {
+    const apiId = event?.apiId;
+    const oldName = event?.oldName;
+    const newName = event?.newName;
+
+    if (!apiId || !oldName || !newName || oldName === newName) {
+        return;
+    }
+
+    const groupsChanged = migrateRegexPresetGroupScopeAfterRename(apiId, oldName, newName);
+    const allowedChanged = migrateRegexPresetAllowedAfterRename(apiId, oldName, newName);
+    const pendingChanged = migratePendingRegexPresetSavesAfterRename(apiId, oldName, newName);
+
+    if (groupsChanged || allowedChanged) {
+        markRegexGroupSettingsSavePending();
+    }
+
+    if (pendingChanged) {
+        schedulePendingRegexChangesFlushCheck();
+    }
+
+    syncRegexVuePresetListFromContext();
+}
+
+function migrateRegexPresetGroupScopeAfterRename(apiId, oldName, newName) {
+    const root = getRegexGroupSettingsRoot();
+    const oldKey = getRegexPresetGroupScopeKey(apiId, oldName);
+    const newKey = getRegexPresetGroupScopeKey(apiId, newName);
+
+    if (oldKey === newKey || !root.scopes[oldKey] || typeof root.scopes[oldKey] !== 'object') {
+        return false;
+    }
+
+    root.scopes[newKey] = root.scopes[oldKey];
+    delete root.scopes[oldKey];
+    extension_settings[SETTINGS_KEY].regexListGroups = settings.regexListGroups;
+    return true;
+}
+
+function migrateRegexPresetAllowedAfterRename(apiId, oldName, newName) {
+    const root = extension_settings.preset_allowed_regex;
+
+    if (!root || typeof root !== 'object' || !Array.isArray(root[apiId])) {
+        return false;
+    }
+
+    if (!root[apiId].includes(oldName)) {
+        return false;
+    }
+
+    const before = root[apiId].join('\u0000');
+    const nextNames = root[apiId].filter(name => name !== oldName && name !== newName);
+
+    nextNames.push(newName);
+    root[apiId] = nextNames;
+    return before !== root[apiId].join('\u0000');
+}
+
+function migratePendingRegexPresetSavesAfterRename(apiId, oldName, newName) {
+    const state = getRegexQuickOperationState();
+
+    if (!(state.pendingRegexScriptSaves instanceof Map)) {
+        return false;
+    }
+
+    const oldKey = getRegexPresetGroupScopeKey(apiId, oldName);
+    const newKey = getRegexPresetGroupScopeKey(apiId, newName);
+    let changed = false;
+
+    for (const [key, entry] of Array.from(state.pendingRegexScriptSaves.entries())) {
+        if (entry?.scriptType !== REGEX_SCRIPT_TYPES.PRESET || entry.apiId !== apiId || entry.presetName !== oldName) {
+            continue;
+        }
+
+        state.pendingRegexScriptSaves.delete(key);
+        state.pendingRegexScriptSaves.set(newKey, {
+            ...entry,
+            presetName: newName,
+            scopeKey: newKey,
+        });
+        changed = true;
+    }
+
+    if (!changed && state.pendingRegexScriptSaves.has(oldKey)) {
+        const entry = state.pendingRegexScriptSaves.get(oldKey);
+        state.pendingRegexScriptSaves.delete(oldKey);
+        state.pendingRegexScriptSaves.set(newKey, {
+            ...entry,
+            apiId,
+            presetName: newName,
+            scopeKey: newKey,
+        });
+        changed = true;
+    }
+
+    return changed;
 }
 
 function installRegexVueNativeRenderGuard() {
@@ -6851,10 +6976,14 @@ function getRegexGroupScopeKey(scriptType) {
             return `scoped:${avatar || 'none'}`;
         }
         case REGEX_SCRIPT_TYPES.PRESET:
-            return `preset:${getRegexCurrentPresetAPI() || 'unknown'}:${getRegexCurrentPresetName() || 'unknown'}`;
+            return getRegexPresetGroupScopeKey(getRegexCurrentPresetAPI(), getRegexCurrentPresetName());
         default:
             return `unknown:${scriptType}`;
     }
+}
+
+function getRegexPresetGroupScopeKey(apiId, presetName) {
+    return `preset:${apiId || 'unknown'}:${presetName || 'unknown'}`;
 }
 
 function getRegexDefaultUngroupedGroupName() {
