@@ -19,10 +19,11 @@ import { isMobile, favsToHotswap } from '../../../RossAscends-mods.js';
 import { getPresetManager } from '../../../preset-manager.js';
 import { applyPowerUserSettings, power_user } from '../../../power-user.js';
 import { sendMessageAs } from '../../../slash-commands.js';
+import { accountStorage } from '../../../util/AccountStorage.js';
 import { isAdmin } from '../../../user.js';
 import { debounce, download, getFileText, regexFromString, resetScrollHeight, setInfoBlock, uuidv4 } from '../../../utils.js';
 import { getCurrentPresetAPI as getRegexCurrentPresetAPI, getCurrentPresetName as getRegexCurrentPresetName, getScriptsByType as getRegexScriptsByType, runRegexScript, SCRIPT_TYPES as REGEX_SCRIPT_TYPES, substitute_find_regex } from '../../regex/engine.js';
-const CURRENT_VERSION = '0.25.9';
+const CURRENT_VERSION = '0.25.17';
 const LOCAL_ASSET_VERSION = getLocalAssetVersion(CURRENT_VERSION);
 const { SaveGenerateDisplay } = await importVersionedLocalModule('./saveGenerateDisplay.js');
 const chatOptimizations = await importVersionedLocalModule('./chatOptimizations.js');
@@ -206,6 +207,19 @@ const DESCRIPTION_CODEMIRROR_CDN_MODULES = {
 const WORLD_INFO_DRAWER_HANDLER_KEY = '__baiBaiToolkitWorldInfoDrawerHandler';
 const WORLD_INFO_LAZY_SELECT2_PATCH_KEY = '__baiBaiToolkitWorldInfoLazySelect2Patched';
 const WORLD_INFO_CHARACTER_FILTER_APPEND_PATCH_KEY = '__baiBaiToolkitWorldInfoCharacterFilterAppendPatched';
+const LEFT_NAV_DRAWER_OPTIMIZATION_KEY = '__baiBaiToolkitLeftNavDrawerOptimization';
+const LEFT_NAV_DRAWER_STYLE_ID = 'bai_bai_toolkit_left_nav_drawer_optimization_style';
+const LEFT_NAV_DRAWER_OPTIMIZED_CLASS = 'bai-bai-left-nav-optimized';
+const LEFT_NAV_DRAWER_OPEN_CLASS = 'bai-bai-left-nav-open';
+const LEFT_NAV_DRAWER_ICON_OPEN_CLASS = 'bai-bai-left-nav-icon-open';
+const LEFT_NAV_DRAWER_ICON_CLOSED_CLASS = 'bai-bai-left-nav-icon-closed';
+const LEFT_NAV_DRAWER_CLOSED_FALLBACK_TRANSFORM = 'translateX(calc(-1 * var(--bai-bai-left-nav-width) - 16px))';
+const LEFT_NAV_DRAWER_OPEN_TRANSFORM = 'translateX(0)';
+const LEFT_NAV_DRAWER_ANIMATION_DURATION_MS = 1;
+const LEFT_NAV_DRAWER_MAX_WIDTH_PX = 420;
+const LEFT_NAV_DRAWER_MOBILE_BREAKPOINT_PX = 1000;
+const LEFT_NAV_DRAWER_VIEWPORT_GAP_PX = 12;
+const LEFT_NAV_DRAWER_CLOSED_EXTRA_OFFSET_PX = 16;
 const CHARACTER_SEARCH_OPTIMIZATION_KEY = 'baiBaiToolkitCharacterSearchOptimization';
 const REGEX_CONTAINER_SELECTOR = '#regex_container';
 const REGEX_EXTENSIONS_PANEL_SELECTOR = '#rm_extensions_block';
@@ -337,6 +351,7 @@ const defaultSettings = {
     customCssInputOptimizationEnabled: true,
     customCssShadowPropertyEnabled: true,
     worldInfoDrawerOptimizationEnabled: true,
+    leftNavDrawerOptimizationEnabled: true,
     characterSearchInputOptimizationEnabled: true,
     baibaokuSettingsAccelerationEnabled: true,
     fastCharacterListEnabled: true,
@@ -2727,6 +2742,14 @@ async function renderSettingsPanel() {
             applyWorldInfoCharacterFilterOptionsOptimization();
         });
 
+    $('#bai_bai_toolkit_left_nav_drawer_optimization_enabled')
+        .prop('checked', settings.leftNavDrawerOptimizationEnabled)
+        .on('input', function () {
+            settings.leftNavDrawerOptimizationEnabled = Boolean($(this).prop('checked'));
+            saveExtensionSettings();
+            applyLeftNavDrawerOptimization();
+        });
+
     $('#bai_bai_toolkit_character_search_input_optimization_enabled')
         .prop('checked', settings.characterSearchInputOptimizationEnabled)
         .on('input', function () {
@@ -3296,6 +3319,7 @@ function applyFeatureSettings() {
 
     chatOptimizations.applyFastChatListScrollOptimization();
     applyWorldInfoDrawerOptimization();
+    applyLeftNavDrawerOptimization();
     applyWorldInfoLazySelect2Optimization();
     applyWorldInfoCharacterFilterOptionsOptimization();
     applyCharacterSearchInputOptimization();
@@ -9417,6 +9441,569 @@ function applyWorldInfoDrawerOptimization() {
 
     extensionState[WORLD_INFO_DRAWER_HANDLER_KEY] = handler;
     document.addEventListener('click', handler, true);
+}
+
+function applyLeftNavDrawerOptimization() {
+    if (settings.leftNavDrawerOptimizationEnabled) {
+        installLeftNavDrawerOptimization();
+    } else {
+        removeLeftNavDrawerOptimization();
+    }
+}
+
+function getLeftNavDrawerOptimizationState() {
+    if (!extensionState[LEFT_NAV_DRAWER_OPTIMIZATION_KEY] || typeof extensionState[LEFT_NAV_DRAWER_OPTIMIZATION_KEY] !== 'object') {
+        extensionState[LEFT_NAV_DRAWER_OPTIMIZATION_KEY] = {
+            installed: false,
+            clickHandler: null,
+            pointerStartHandler: null,
+            open: false,
+            originalTrigger: null,
+            originalTriggerHandler: null,
+            patchedTrigger: null,
+            patchedTriggerHandler: null,
+            jqueryTriggerInstalled: false,
+            retryTimer: null,
+            deferredStateTimer: null,
+            transformAnimation: null,
+            transformClosedTransform: '',
+        };
+    }
+
+    return extensionState[LEFT_NAV_DRAWER_OPTIMIZATION_KEY];
+}
+
+function installLeftNavDrawerOptimization() {
+    const state = getLeftNavDrawerOptimizationState();
+
+    if (state.retryTimer) {
+        clearTimeout(state.retryTimer);
+        state.retryTimer = null;
+    }
+    if (state.deferredStateTimer) {
+        clearTimeout(state.deferredStateTimer);
+        state.deferredStateTimer = null;
+    }
+    if (state.transformAnimation) {
+        try {
+            state.transformAnimation.cancel();
+        } catch {
+            // The animation can be safely recreated below if the browser has already detached it.
+        }
+        state.transformAnimation = null;
+        state.transformClosedTransform = '';
+    }
+
+    const elements = getLeftNavDrawerElements();
+    if (!elements) {
+        state.retryTimer = setTimeout(() => {
+            state.retryTimer = null;
+            applyLeftNavDrawerOptimization();
+        }, 1000);
+        return;
+    }
+
+    installLeftNavDrawerOptimizationStyle();
+    prepareLeftNavDrawerOptimizedState(elements);
+    installLeftNavDrawerJQueryTriggerGuard(state);
+
+    if (state.installed) {
+        return;
+    }
+
+    state.pointerStartHandler = handleLeftNavDrawerOptimizedPointerStart;
+    state.clickHandler = handleLeftNavDrawerOptimizedClick;
+    window.addEventListener('mousedown', state.pointerStartHandler, true);
+    window.addEventListener('click', state.clickHandler, true);
+    state.installed = true;
+    console.debug(`${LOG_PREFIX} Left nav drawer optimization installed`);
+}
+
+function removeLeftNavDrawerOptimization() {
+    const state = extensionState[LEFT_NAV_DRAWER_OPTIMIZATION_KEY];
+
+    if (!state) {
+        removeLeftNavDrawerOptimizationStyle();
+        return;
+    }
+
+    if (state.retryTimer) {
+        clearTimeout(state.retryTimer);
+        state.retryTimer = null;
+    }
+    if (state.deferredStateTimer) {
+        clearTimeout(state.deferredStateTimer);
+        state.deferredStateTimer = null;
+    }
+    if (state.transformAnimation) {
+        try {
+            state.transformAnimation.cancel();
+        } catch {
+            // The animation may already be detached during teardown.
+        }
+        state.transformAnimation = null;
+        state.transformClosedTransform = '';
+    }
+
+    if (state.installed && state.clickHandler) {
+        window.removeEventListener('click', state.clickHandler, true);
+    }
+    if (state.installed && state.pointerStartHandler) {
+        window.removeEventListener('mousedown', state.pointerStartHandler, true);
+    }
+
+    restoreLeftNavDrawerJQueryTriggerGuard(state);
+
+    const elements = getLeftNavDrawerElements();
+    if (elements) {
+        restoreLeftNavDrawerNativeState(elements);
+    }
+
+    removeLeftNavDrawerOptimizationStyle();
+    delete extensionState[LEFT_NAV_DRAWER_OPTIMIZATION_KEY];
+}
+
+function installLeftNavDrawerJQueryTriggerGuard(state) {
+    const jQueryPrototype = globalThis.jQuery?.fn || globalThis.$?.fn;
+    if (!jQueryPrototype || state.jqueryTriggerInstalled) {
+        return;
+    }
+
+    if (typeof jQueryPrototype.trigger === 'function') {
+        state.originalTrigger = jQueryPrototype.trigger;
+        state.patchedTrigger = function baiBaiToolkitLeftNavDrawerJQueryTrigger(eventType, ...args) {
+            if (shouldHandleLeftNavDrawerJQueryTrigger(this, eventType)) {
+                toggleLeftNavDrawerOptimizedOpen();
+                return this;
+            }
+
+            return state.originalTrigger.call(this, eventType, ...args);
+        };
+        jQueryPrototype.trigger = state.patchedTrigger;
+    }
+
+    if (typeof jQueryPrototype.triggerHandler === 'function') {
+        state.originalTriggerHandler = jQueryPrototype.triggerHandler;
+        state.patchedTriggerHandler = function baiBaiToolkitLeftNavDrawerJQueryTriggerHandler(eventType, ...args) {
+            if (shouldHandleLeftNavDrawerJQueryTrigger(this, eventType)) {
+                toggleLeftNavDrawerOptimizedOpen();
+                return undefined;
+            }
+
+            return state.originalTriggerHandler.call(this, eventType, ...args);
+        };
+        jQueryPrototype.triggerHandler = state.patchedTriggerHandler;
+    }
+
+    state.jqueryTriggerInstalled = Boolean(state.patchedTrigger || state.patchedTriggerHandler);
+}
+
+function restoreLeftNavDrawerJQueryTriggerGuard(state) {
+    const jQueryPrototype = globalThis.jQuery?.fn || globalThis.$?.fn;
+    if (!jQueryPrototype || !state?.jqueryTriggerInstalled) {
+        return;
+    }
+
+    if (jQueryPrototype.trigger === state.patchedTrigger && typeof state.originalTrigger === 'function') {
+        jQueryPrototype.trigger = state.originalTrigger;
+    }
+
+    if (jQueryPrototype.triggerHandler === state.patchedTriggerHandler && typeof state.originalTriggerHandler === 'function') {
+        jQueryPrototype.triggerHandler = state.originalTriggerHandler;
+    }
+
+    state.jqueryTriggerInstalled = false;
+    state.originalTrigger = null;
+    state.originalTriggerHandler = null;
+    state.patchedTrigger = null;
+    state.patchedTriggerHandler = null;
+}
+
+function getLeftNavDrawerOptimizedEventIntent(event) {
+    if (!settings.leftNavDrawerOptimizationEnabled) {
+        return null;
+    }
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) {
+        return null;
+    }
+
+    const elements = getLeftNavDrawerElements();
+    if (!elements) {
+        return null;
+    }
+
+    const iconTarget = target.closest('#leftNavDrawerIcon');
+    if (iconTarget === elements.icon) {
+        return { type: 'toggle', elements };
+    }
+
+    if (!getLeftNavDrawerOptimizationState().open) {
+        return null;
+    }
+
+    if (elements.panel.contains(target) || isLeftNavDrawerPinned(elements)) {
+        return null;
+    }
+
+    return { type: 'close-outside', elements };
+}
+
+function stopLeftNavDrawerOptimizedEvent(event, { preventDefault = true } = {}) {
+    if (preventDefault && typeof event.preventDefault === 'function') {
+        event.preventDefault();
+    }
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+}
+
+function getLeftNavDrawerElements() {
+    const icon = document.getElementById('leftNavDrawerIcon');
+    const panel = document.getElementById('left-nav-panel');
+
+    if (!(icon instanceof HTMLElement) || !(panel instanceof HTMLElement)) {
+        return null;
+    }
+
+    return { icon, panel };
+}
+
+function prepareLeftNavDrawerOptimizedState(elements) {
+    const nativeOpen = elements.panel.classList.contains('openDrawer')
+        || elements.icon.classList.contains('openIcon')
+        || getLeftNavDrawerOptimizationState().open;
+
+    if (!elements.panel.classList.contains(LEFT_NAV_DRAWER_OPTIMIZED_CLASS)) {
+        elements.panel.classList.add(LEFT_NAV_DRAWER_OPTIMIZED_CLASS);
+    }
+    if (elements.panel.classList.contains('openDrawer')) {
+        elements.panel.classList.remove('openDrawer');
+    }
+    if (!elements.panel.classList.contains('closedDrawer')) {
+        elements.panel.classList.add('closedDrawer');
+    }
+    if (elements.icon.classList.contains('openIcon')) {
+        elements.icon.classList.remove('openIcon');
+    }
+    if (!elements.icon.classList.contains('closedIcon')) {
+        elements.icon.classList.add('closedIcon');
+    }
+    elements.panel.removeAttribute('aria-hidden');
+    elements.icon.removeAttribute('aria-expanded');
+
+    setLeftNavDrawerOptimizedOpen(nativeOpen, { persist: false });
+}
+
+function restoreLeftNavDrawerNativeState(elements) {
+    const open = getLeftNavDrawerOptimizationState().open;
+
+    elements.panel.classList.remove(LEFT_NAV_DRAWER_OPTIMIZED_CLASS, LEFT_NAV_DRAWER_OPEN_CLASS);
+    elements.icon.classList.remove(LEFT_NAV_DRAWER_ICON_OPEN_CLASS, LEFT_NAV_DRAWER_ICON_CLOSED_CLASS);
+    elements.panel.style.opacity = '';
+    elements.panel.style.pointerEvents = '';
+    elements.panel.style.transform = '';
+    elements.icon.style.opacity = '';
+
+    elements.panel.classList.toggle('openDrawer', open);
+    elements.panel.classList.toggle('closedDrawer', !open);
+    elements.icon.classList.toggle('openIcon', open);
+    elements.icon.classList.toggle('closedIcon', !open);
+    elements.panel.removeAttribute('aria-hidden');
+    elements.icon.removeAttribute('aria-expanded');
+}
+
+function handleLeftNavDrawerOptimizedClick(event) {
+    const intent = getLeftNavDrawerOptimizedEventIntent(event);
+    if (!intent) {
+        return;
+    }
+
+    stopLeftNavDrawerOptimizedEvent(event);
+    if (intent.type === 'toggle') {
+        toggleLeftNavDrawerOptimizedOpen(intent.elements);
+        return;
+    }
+
+    setLeftNavDrawerOptimizedOpen(false);
+}
+
+function handleLeftNavDrawerOptimizedPointerStart(event) {
+    const intent = getLeftNavDrawerOptimizedEventIntent(event);
+    if (!intent) {
+        return;
+    }
+
+    stopLeftNavDrawerOptimizedEvent(event, { preventDefault: false });
+}
+
+function shouldHandleLeftNavDrawerJQueryTrigger(collection, eventType) {
+    if (!settings.leftNavDrawerOptimizationEnabled) {
+        return false;
+    }
+
+    const type = typeof eventType === 'string'
+        ? eventType.split('.')[0]
+        : String(eventType?.type || '').split('.')[0];
+
+    if (type !== 'click' || !collection || collection.length !== 1) {
+        return false;
+    }
+
+    return collection[0] === document.getElementById('leftNavDrawerIcon');
+}
+
+function toggleLeftNavDrawerOptimizedOpen(elements = getLeftNavDrawerElements()) {
+    if (!elements) {
+        return;
+    }
+
+    const nextOpen = !getLeftNavDrawerOptimizationState().open;
+    if (nextOpen) {
+        closeOtherNativeDrawersBeforeLeftNavOpen(elements);
+    }
+
+    setLeftNavDrawerOptimizedOpen(nextOpen);
+}
+
+function closeOtherNativeDrawersBeforeLeftNavOpen({ icon, panel }) {
+    document.querySelectorAll('.openIcon:not(.drawerPinnedOpen)').forEach(openIcon => {
+        if (openIcon === icon) {
+            return;
+        }
+
+        openIcon.classList.remove('openIcon');
+        openIcon.classList.add('closedIcon');
+    });
+
+    document.querySelectorAll('.openDrawer:not(.pinnedOpen)').forEach(openDrawer => {
+        if (openDrawer === panel) {
+            return;
+        }
+
+        openDrawer.classList.remove('openDrawer');
+        openDrawer.classList.add('closedDrawer');
+    });
+}
+
+function setLeftNavDrawerOptimizedOpen(open, { persist = true } = {}) {
+    const elements = getLeftNavDrawerElements();
+    if (!elements) {
+        return;
+    }
+
+    const { panel } = elements;
+    const state = getLeftNavDrawerOptimizationState();
+    state.open = Boolean(open);
+
+    setLeftNavDrawerTransformState(panel, open);
+    scheduleLeftNavDrawerDeferredState(open, { persist });
+
+    if (open && !CSS.supports('field-sizing', 'content')) {
+        requestAnimationFrame(() => {
+            if (!getLeftNavDrawerOptimizationState().open) {
+                return;
+            }
+
+            panel.querySelectorAll('textarea.autoSetHeight').forEach(textarea => {
+                void resetScrollHeight(textarea);
+            });
+        });
+    }
+}
+
+function setLeftNavDrawerTransformState(panel, open) {
+    const closedTransform = getLeftNavDrawerClosedTransform();
+    const animation = getLeftNavDrawerTransformAnimation(panel);
+
+    if (!animation) {
+        panel.style.transform = open ? LEFT_NAV_DRAWER_OPEN_TRANSFORM : closedTransform;
+        return;
+    }
+
+    try {
+        animation.pause();
+        animation.currentTime = open ? LEFT_NAV_DRAWER_ANIMATION_DURATION_MS : 0;
+    } catch {
+        panel.style.transform = open ? LEFT_NAV_DRAWER_OPEN_TRANSFORM : closedTransform;
+    }
+}
+
+function getLeftNavDrawerTransformAnimation(panel) {
+    const state = getLeftNavDrawerOptimizationState();
+    const closedTransform = getLeftNavDrawerClosedTransform();
+
+    if (state.transformAnimation?.effect?.target === panel && state.transformClosedTransform === closedTransform) {
+        return state.transformAnimation;
+    }
+
+    if (state.transformAnimation) {
+        try {
+            state.transformAnimation.cancel();
+        } catch {
+            // A stale animation should not block recreating the drawer transform state.
+        }
+        state.transformAnimation = null;
+        state.transformClosedTransform = '';
+    }
+
+    if (typeof panel.animate !== 'function') {
+        return null;
+    }
+
+    let animation;
+    try {
+        animation = panel.animate([
+            { transform: closedTransform },
+            { transform: LEFT_NAV_DRAWER_OPEN_TRANSFORM },
+        ], {
+            duration: LEFT_NAV_DRAWER_ANIMATION_DURATION_MS,
+            easing: 'linear',
+            fill: 'both',
+        });
+    } catch {
+        return null;
+    }
+
+    animation.pause();
+    state.transformAnimation = animation;
+    state.transformClosedTransform = closedTransform;
+    return animation;
+}
+
+function getLeftNavDrawerClosedTransform() {
+    const viewportWidth = Math.max(0, window.innerWidth || document.documentElement.clientWidth || 0);
+    const drawerWidth = Math.max(0, isLeftNavDrawerMobileLayout()
+        ? viewportWidth
+        : Math.min(LEFT_NAV_DRAWER_MAX_WIDTH_PX, viewportWidth - LEFT_NAV_DRAWER_VIEWPORT_GAP_PX));
+
+    if (!drawerWidth) {
+        return LEFT_NAV_DRAWER_CLOSED_FALLBACK_TRANSFORM;
+    }
+
+    return `translateX(-${drawerWidth + LEFT_NAV_DRAWER_CLOSED_EXTRA_OFFSET_PX}px)`;
+}
+
+function isLeftNavDrawerMobileLayout() {
+    return Boolean(window.matchMedia?.(`(max-width: ${LEFT_NAV_DRAWER_MOBILE_BREAKPOINT_PX}px)`)?.matches)
+        || Math.max(0, window.innerWidth || document.documentElement.clientWidth || 0) <= LEFT_NAV_DRAWER_MOBILE_BREAKPOINT_PX;
+}
+
+function scheduleLeftNavDrawerDeferredState(open, { persist }) {
+    const state = getLeftNavDrawerOptimizationState();
+
+    if (state.deferredStateTimer) {
+        clearTimeout(state.deferredStateTimer);
+    }
+
+    state.deferredStateTimer = setTimeout(() => {
+        state.deferredStateTimer = null;
+
+        if (state.open !== Boolean(open)) {
+            return;
+        }
+
+        if (persist) {
+            setLeftNavDrawerOpenedStorage(open);
+        }
+    }, 120);
+}
+
+function isLeftNavDrawerPinned({ icon, panel }) {
+    const pin = document.getElementById('lm_button_panel_pin');
+    return Boolean(pin instanceof HTMLInputElement && pin.checked)
+        || panel.classList.contains('pinnedOpen')
+        || icon.classList.contains('drawerPinnedOpen');
+}
+
+function setLeftNavDrawerOpenedStorage(open) {
+    try {
+        accountStorage?.setItem?.('LNavOpened', open ? 'true' : 'false');
+    } catch {
+        // Persisting drawer state should never block the drawer interaction.
+    }
+}
+
+function installLeftNavDrawerOptimizationStyle() {
+    let style = document.getElementById(LEFT_NAV_DRAWER_STYLE_ID);
+
+    if (!style) {
+        style = document.createElement('style');
+        style.id = LEFT_NAV_DRAWER_STYLE_ID;
+        document.head.append(style);
+    }
+
+    style.textContent = `
+:root {
+    --bai-bai-left-nav-width: min(420px, calc(100vw - 12px));
+}
+
+html body #left-nav-panel.drawer-content.${LEFT_NAV_DRAWER_OPTIMIZED_CLASS} {
+    position: fixed !important;
+    left: 0 !important;
+    right: auto !important;
+    top: 0 !important;
+    bottom: auto !important;
+    width: var(--bai-bai-left-nav-width) !important;
+    max-width: var(--bai-bai-left-nav-width) !important;
+    min-width: min(100px, var(--bai-bai-left-nav-width)) !important;
+    height: 100% !important;
+    max-height: calc(100dvh - var(--topBarBlockSize)) !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    flex-flow: column !important;
+    overflow: hidden !important;
+    z-index: 30000 !important;
+    contain: layout paint style !important;
+    isolation: isolate !important;
+    transition: none !important;
+    animation: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+@media screen and (max-width: ${LEFT_NAV_DRAWER_MOBILE_BREAKPOINT_PX}px) {
+    html body #left-nav-panel.drawer-content.${LEFT_NAV_DRAWER_OPTIMIZED_CLASS} {
+        left: 0 !important;
+        right: auto !important;
+        top: var(--topBarBlockSize) !important;
+        bottom: auto !important;
+        width: 100dvw !important;
+        max-width: 100dvw !important;
+        min-width: 100dvw !important;
+        height: calc(100dvh - 45px) !important;
+        max-height: calc(100dvh - 45px) !important;
+        margin: 0 auto !important;
+        resize: none !important;
+        overflow: hidden !important;
+    }
+}
+
+@media screen and (max-width: ${LEFT_NAV_DRAWER_MOBILE_BREAKPOINT_PX}px) {
+    @supports (-webkit-touch-callout: none) {
+        html body #left-nav-panel.drawer-content.${LEFT_NAV_DRAWER_OPTIMIZED_CLASS} {
+            left: 0 !important;
+            right: 0 !important;
+            top: 0 !important;
+            width: calc(100dvw - 5px) !important;
+            max-width: calc(100dvw - 5px) !important;
+            min-width: calc(100dvw - 5px) !important;
+            height: calc(100dvh - 70px) !important;
+            max-height: calc(100dvh - 70px) !important;
+            margin: 36px auto 0 !important;
+        }
+    }
+}
+
+html body #leftNavDrawerIcon {
+    transition: none !important;
+}
+`;
+}
+
+function removeLeftNavDrawerOptimizationStyle() {
+    document.getElementById(LEFT_NAV_DRAWER_STYLE_ID)?.remove();
 }
 
 function applyWorldInfoLazySelect2Optimization() {
