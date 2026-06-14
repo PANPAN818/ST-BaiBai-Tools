@@ -7,7 +7,6 @@ import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import { INJECTION_POSITION } from '../../../PromptManager.js';
 import { isMobile } from '../../../RossAscends-mods.js';
 import { renderTemplateAsync } from '../../../templates.js';
-import { accountStorage } from '../../../util/AccountStorage.js';
 import { debounce, escapeHtml, getStringHash, uuidv4 } from '../../../utils.js';
 
 const PRESET_PROMPT_CODEMIRROR_EDITOR_KEY = '__baiBaiToolkitPresetPromptCodeMirrorEditor';
@@ -28,7 +27,6 @@ const PRESET_DELETE_HANDLER_KEY = '__baiBaiToolkitPresetDeleteHandler';
 const PRESET_LIST_ACTION_HANDLER_KEY = '__baiBaiToolkitPresetListActionHandler';
 const PRESET_TOGGLE_HANDLER_KEY = '__baiBaiToolkitPresetToggleHandler';
 const PRESET_SAVE_HANDLER_KEY = '__baiBaiToolkitPresetSaveHandler';
-const PRESET_LEFT_NAV_DRAWER_EVENT_GUARD_KEY = '__baiBaiToolkitPresetLeftNavDrawerEventGuard';
 const PRESET_EXPORT_PENDING_CHANGES_HANDLER_KEY = '__baiBaiToolkitPresetExportPendingChangesHandler';
 const PRESET_VUE_LIST_MANAGER_KEY = '__baiBaiToolkitPresetVueListManager';
 const PRESET_VUE_LIST_RENDER_PATCH_KEY = '__baiBaiToolkitPresetVueListRenderPatch';
@@ -71,10 +69,6 @@ const OPENAI_PRESET_SELECT_SELECTOR = '#settings_preset_openai';
 const OPENAI_PRESET_DELETE_SELECTOR = '#delete_oai_preset';
 const OPENAI_PRESET_UPDATE_SELECTOR = '#update_oai_preset';
 const OPENAI_PRESET_EXPORT_SELECTOR = '#export_oai_preset';
-const LEFT_NAV_DRAWER_ICON_SELECTOR = '#leftNavDrawerIcon';
-const LEFT_NAV_DRAWER_PANEL_SELECTOR = '#left-nav-panel';
-const LEFT_NAV_DRAWER_CLOSE_FORBIDDEN_SELECTOR = '#character_cross, #avatar-and-name-block, #shadow_popup, .popup, #world_popup, .ui-widget, .text_pole, #toast-container, .select2-results';
-const LEFT_NAV_DRAWER_SUPPRESS_CLICK_MS = 700;
 const PRESET_PROMPT_MANAGER_LIST_SELECTOR = '#completion_prompt_manager_list';
 const PRESET_VUE_GROUP_DROP_SURFACE_SELECTOR = `${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-body, ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-body-inner, ${PRESET_PROMPT_MANAGER_LIST_SELECTOR} .bai-bai-preset-group-list`;
 const PRESET_PROMPT_MANAGER_SAVE_SELECTOR = '#completion_prompt_manager_popup_entry_form_save';
@@ -7406,12 +7400,6 @@ function suppressPromptManagerDebouncedRender(restoreDelayMs = 0) {
 }
 
 function applyPresetToggleOptimization() {
-    if (settings.presetToggleOptimizationEnabled) {
-        installPresetLeftNavDrawerEventGuard();
-    } else {
-        removePresetLeftNavDrawerEventGuard();
-    }
-
     if (!extensionState[PRESET_TOGGLE_HANDLER_KEY]) {
         const handler = (event) => {
             handlePresetPromptToggleClick(event);
@@ -7433,239 +7421,6 @@ function applyPresetSaveOptimization() {
 
     extensionState[PRESET_SAVE_HANDLER_KEY] = handler;
     document.addEventListener('click', handler, true);
-}
-
-function installPresetLeftNavDrawerEventGuard() {
-    if (extensionState[PRESET_LEFT_NAV_DRAWER_EVENT_GUARD_KEY]) {
-        return;
-    }
-
-    const state = {
-        suppressNextClickUntil: 0,
-        mousedown: (event) => handlePresetLeftNavDrawerMouseDown(event),
-        click: (event) => handlePresetLeftNavDrawerClick(event),
-    };
-
-    window.addEventListener('mousedown', state.mousedown, true);
-    window.addEventListener('click', state.click, true);
-    extensionState[PRESET_LEFT_NAV_DRAWER_EVENT_GUARD_KEY] = state;
-}
-
-function removePresetLeftNavDrawerEventGuard() {
-    const state = extensionState[PRESET_LEFT_NAV_DRAWER_EVENT_GUARD_KEY];
-
-    if (!state) {
-        return;
-    }
-
-    if (state.mousedown) {
-        window.removeEventListener('mousedown', state.mousedown, true);
-    }
-    if (state.click) {
-        window.removeEventListener('click', state.click, true);
-    }
-
-    delete extensionState[PRESET_LEFT_NAV_DRAWER_EVENT_GUARD_KEY];
-}
-
-function handlePresetLeftNavDrawerMouseDown(event) {
-    if (!isPrimaryPresetLeftNavDrawerPointerEvent(event)) {
-        return;
-    }
-
-    const intent = getPresetLeftNavDrawerEventIntent(event);
-
-    if (intent === 'toggle') {
-        stopPresetLeftNavDrawerEvent(event);
-        return;
-    }
-
-    if (intent === 'close') {
-        closePresetLeftNavDrawerFromOutside();
-        markPresetLeftNavDrawerNextClickSuppressed();
-        stopPresetLeftNavDrawerEvent(event);
-    }
-}
-
-function handlePresetLeftNavDrawerClick(event) {
-    if (consumePresetLeftNavDrawerSuppressedClick()) {
-        stopPresetLeftNavDrawerEvent(event);
-        return;
-    }
-
-    const intent = getPresetLeftNavDrawerEventIntent(event);
-
-    if (intent === 'toggle') {
-        const target = getEventElementTarget(event);
-        const icon = target?.closest(LEFT_NAV_DRAWER_ICON_SELECTOR);
-
-        persistPresetLeftNavDrawerIconClickIntent(icon);
-        togglePresetLeftNavDrawerViaClassList();
-        stopPresetLeftNavDrawerEvent(event);
-        return;
-    }
-
-    if (intent === 'close') {
-        closePresetLeftNavDrawerFromOutside();
-        stopPresetLeftNavDrawerEvent(event);
-    }
-}
-
-function getPresetLeftNavDrawerEventIntent(event) {
-    if (!settings.presetToggleOptimizationEnabled) {
-        return null;
-    }
-
-    const target = getEventElementTarget(event);
-
-    if (!target) {
-        return null;
-    }
-
-    const icon = target.closest(LEFT_NAV_DRAWER_ICON_SELECTOR);
-
-    if (icon) {
-        return 'toggle';
-    }
-
-    const elements = getPresetLeftNavDrawerElements();
-
-    if (!elements || !elements.panel.classList.contains('openDrawer') || isPresetLeftNavDrawerPinned(elements)) {
-        return null;
-    }
-
-    if (target.closest(LEFT_NAV_DRAWER_PANEL_SELECTOR)
-        || target.closest(LEFT_NAV_DRAWER_CLOSE_FORBIDDEN_SELECTOR)
-        || target.closest('.openDrawer')
-        || target.closest('.drawer-icon')) {
-        return null;
-    }
-
-    return 'close';
-}
-
-function getEventElementTarget(event) {
-    if (event.target instanceof Element) {
-        return event.target;
-    }
-
-    if (event.target instanceof Node) {
-        return event.target.parentElement;
-    }
-
-    return null;
-}
-
-function isPrimaryPresetLeftNavDrawerPointerEvent(event) {
-    return !(event instanceof MouseEvent) || event.button === 0;
-}
-
-function stopPresetLeftNavDrawerEvent(event) {
-    if (typeof event.preventDefault === 'function') {
-        event.preventDefault();
-    }
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-}
-
-function markPresetLeftNavDrawerNextClickSuppressed() {
-    const state = extensionState[PRESET_LEFT_NAV_DRAWER_EVENT_GUARD_KEY];
-
-    if (state) {
-        state.suppressNextClickUntil = Date.now() + LEFT_NAV_DRAWER_SUPPRESS_CLICK_MS;
-    }
-}
-
-function consumePresetLeftNavDrawerSuppressedClick() {
-    const state = extensionState[PRESET_LEFT_NAV_DRAWER_EVENT_GUARD_KEY];
-
-    if (!state?.suppressNextClickUntil) {
-        return false;
-    }
-
-    const shouldSuppress = Date.now() <= state.suppressNextClickUntil;
-    state.suppressNextClickUntil = 0;
-    return shouldSuppress;
-}
-
-function persistPresetLeftNavDrawerIconClickIntent(icon) {
-    if (!(icon instanceof HTMLElement)) {
-        return;
-    }
-
-    try {
-        accountStorage.setItem('LNavOpened', icon.classList.contains('openIcon') ? 'false' : 'true');
-    } catch (error) {
-        console.debug(`${LOG_PREFIX} Failed to persist left nav drawer state`, error);
-    }
-}
-
-function getPresetLeftNavDrawerElements() {
-    const icon = document.querySelector(LEFT_NAV_DRAWER_ICON_SELECTOR);
-    const panel = document.querySelector(LEFT_NAV_DRAWER_PANEL_SELECTOR);
-
-    if (!(icon instanceof HTMLElement) || !(panel instanceof HTMLElement)) {
-        return null;
-    }
-
-    return { icon, panel };
-}
-
-function isPresetLeftNavDrawerPinned({ icon, panel }) {
-    const pin = document.getElementById('lm_button_panel_pin');
-
-    return Boolean(pin instanceof HTMLInputElement && pin.checked)
-        || panel.classList.contains('pinnedOpen')
-        || icon.classList.contains('drawerPinnedOpen');
-}
-
-function togglePresetLeftNavDrawerViaClassList() {
-    const elements = getPresetLeftNavDrawerElements();
-
-    if (!elements) {
-        return;
-    }
-
-    if (elements.panel.classList.contains('openDrawer')) {
-        elements.icon.classList.remove('openIcon');
-        elements.icon.classList.add('closedIcon');
-        elements.panel.classList.remove('openDrawer');
-        elements.panel.classList.add('closedDrawer');
-        return;
-    }
-
-    for (const openIcon of document.querySelectorAll('.openIcon:not(.drawerPinnedOpen)')) {
-        openIcon.classList.remove('openIcon');
-        openIcon.classList.add('closedIcon');
-    }
-
-    for (const drawer of document.querySelectorAll('.openDrawer:not(.pinnedOpen)')) {
-        drawer.classList.remove('openDrawer');
-        drawer.classList.add('closedDrawer');
-    }
-
-    elements.icon.classList.remove('closedIcon');
-    elements.icon.classList.add('openIcon');
-    elements.panel.classList.remove('closedDrawer');
-    elements.panel.classList.add('openDrawer');
-}
-
-function closePresetLeftNavDrawerFromOutside() {
-    for (const openIcon of document.querySelectorAll('.openIcon:not(.drawerPinnedOpen)')) {
-        openIcon.classList.remove('openIcon');
-        openIcon.classList.add('closedIcon');
-    }
-
-    for (const drawer of document.querySelectorAll('.openDrawer:not(.pinnedOpen)')) {
-        drawer.classList.remove('openDrawer');
-        drawer.classList.add('closedDrawer');
-    }
-
-    try {
-        accountStorage.setItem('LNavOpened', 'false');
-    } catch {
-        // Persisting drawer state should never block the drawer interaction.
-    }
 }
 
 function handlePresetPromptToggleClick(event) {
