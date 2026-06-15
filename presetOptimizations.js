@@ -897,7 +897,10 @@ function createPresetBackupPreviewRootComponent(vue, model) {
                         ? this.pagedItems.map(item => renderPresetBackupPreviewItem(h, this, item))
                         : [h('div', { class: 'bai-bai-preset-backup-empty' }, this.hasLoaded
                             ? '\u6682\u65e0\u5907\u4efd\u6570\u636e'
-                            : '\u5237\u65b0\u83b7\u53d6\u5907\u4efd\u6570\u636e')]),
+                            : [
+                                h('span', '\u5237\u65b0\u83b7\u53d6\u5907\u4efd\u6570\u636e'),
+                                h('span', '\u4fdd\u5b58\u9884\u8bbe\u65f6\u81ea\u52a8\u521b\u5efa\u5907\u4efd'),
+                            ])]),
                     h('div', { class: 'bai-bai-preset-backup-footer' }, [
                         h('div', { class: 'bai-bai-preset-backup-status' }, this.displayStatus),
                         h('div', { class: 'bai-bai-preset-backup-pagination', 'aria-label': '\u5907\u4efd\u5206\u9875' }, [
@@ -1524,8 +1527,10 @@ function applyPresetBackupPreviewUiStyle() {
 
 #${PRESET_BACKUP_PREVIEW_UI_ID} .bai-bai-preset-backup-empty {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 4px;
     min-height: 64px;
     padding: 10px;
     border: 1px dashed var(--SmartThemeBorderColor);
