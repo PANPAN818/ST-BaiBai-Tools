@@ -49,7 +49,7 @@ const LONG_CHAT_DOM_RENDER_ESTIMATE_EXTRA_PX = 80;
 const LONG_CHAT_DOM_RENDER_ESTIMATE_MAX_HEIGHT = 80000;
 const LONG_CHAT_DOM_RENDER_ESTIMATOR_ALPHA = 0.35;
 const LONG_CHAT_DOM_RENDER_ESTIMATOR_MAX_SCALE = 4;
-const LONG_CHAT_DOM_RENDER_FORCE_DISABLED = true;
+const LONG_CHAT_DOM_RENDER_FORCE_DISABLED = false;
 const LONG_CHAT_DOM_RENDER_BOTTOM_ANCHOR_CLASS = 'bai-bai-toolkit-long-chat-bottom-anchor';
 const LONG_CHAT_DOM_RENDER_BOTTOM_ANCHORED_CLASS = 'bai-bai-toolkit-long-chat-bottom-anchored';
 const LONG_CHAT_DOM_RENDER_HEIGHT_VAR = '--bai-bai-toolkit-long-chat-mes-height';
@@ -656,15 +656,12 @@ function installLongChatDomRenderOptimization() {
         };
         const chatMutationHandler = (reason = 'chat-update') => {
             scheduleLongChatDomRenderRefresh({ autoScroll: false, reason, mode: 'full' });
-            scheduleLongChatDomRenderGenerationAnchor('chat-update');
         };
         const messageRenderedHandler = (messageId) => {
             scheduleLongChatDomRenderRefresh({ autoScroll: false, reason: 'message-rendered', mode: 'incremental', messageIds: [messageId] });
-            scheduleLongChatDomRenderGenerationAnchor('message-rendered');
         };
         const messageUpdatedHandler = (messageId) => {
             scheduleLongChatDomRenderRefresh({ autoScroll: false, reason: 'message-updated', mode: 'incremental', messageIds: [messageId] });
-            scheduleLongChatDomRenderGenerationAnchor('message-updated');
         };
         const messageDeletedHandler = () => {
             pruneLongChatDomRenderCurrentChatHeightCache();
@@ -672,20 +669,13 @@ function installLongChatDomRenderOptimization() {
         };
         const generationStartedHandler = () => {
             state.generationActive = true;
-            state.generationAnchorEnabled = shouldStartLongChatDomRenderGenerationAnchor();
-            if (state.generationAnchorEnabled) {
-                state.userScrolledAway = false;
-                scheduleLongChatDomRenderGenerationAnchor('generation-started');
-            }
+            state.generationAnchorEnabled = false;
             scheduleLongChatDomRenderRefresh({ autoScroll: false, reason: 'generation-started', mode: 'incremental', messageIds: [getLongChatDomRenderLatestMessageId()] });
         };
         const generationEndedHandler = () => {
-            const shouldScrollToLatestMessageStart = shouldScrollLongChatDomRenderToLatestMessageStartAfterGeneration(state);
             state.generationActive = false;
-            releaseLongChatDomRenderGenerationAnchor();
-            if (shouldScrollToLatestMessageStart) {
-                scheduleLongChatDomRenderScrollToLatestMessageStart('generation-ended');
-            }
+            state.generationAnchorEnabled = false;
+            removeLongChatDomRenderBottomAnchorIfIdle(state);
         };
 
         addLongChatDomRenderEventHandler(event_types.CHAT_CHANGED, chatLoadHandler);
@@ -740,7 +730,9 @@ function removeLongChatDomRenderOptimization() {
     state.mutationObserver?.disconnect();
     state.mutationObserver = null;
 
-    document.getElementById(LONG_CHAT_DOM_RENDER_STYLE_ID)?.remove();
+    if (settings.messageCompletionScrollToMiddleEnabled === false) {
+        document.getElementById(LONG_CHAT_DOM_RENDER_STYLE_ID)?.remove();
+    }
     cleanupLongChatDomRenderMessages();
 }
 
@@ -948,9 +940,7 @@ function refreshLongChatDomRenderOptimization({ reason = '', mode = 'full', mess
     }
     updateLongChatDomRenderRoleHeightEstimators(state, uncontainedTailMessages, chat, chatWidth);
 
-    if (shouldOptimize && isLongChatDomRenderGenerationActive()) {
-        scheduleLongChatDomRenderGenerationAnchor(reason || 'refresh');
-    } else if (!shouldOptimize && state.generationAnchorEnabled) {
+    if (!shouldOptimize && state.generationAnchorEnabled) {
         state.generationAnchorEnabled = false;
         removeLongChatDomRenderBottomAnchorIfIdle(state);
     }
@@ -1035,9 +1025,7 @@ function refreshLongChatDomRenderIncremental({ state, chatElement, chat, reason 
 
     state.tailMessageIds = nextTailMessageIds;
 
-    if (shouldOptimize && isLongChatDomRenderGenerationActive()) {
-        scheduleLongChatDomRenderGenerationAnchor(reason || 'refresh');
-    } else if (!shouldOptimize && state.generationAnchorEnabled) {
+    if (!shouldOptimize && state.generationAnchorEnabled) {
         state.generationAnchorEnabled = false;
         removeLongChatDomRenderBottomAnchorIfIdle(state);
     }
@@ -1064,6 +1052,10 @@ function logLongChatDomRenderRefresh(stats, mode = 'full') {
 }
 
 function updateLongChatDomRenderRoleHeightEstimatorsForIds(state, chatElement, messageIds, chat, width) {
+    if (isLongChatDomRenderGenerationActive()) {
+        return;
+    }
+
     const elements = [];
 
     for (const mesId of messageIds || []) {
@@ -1081,6 +1073,10 @@ function updateLongChatDomRenderRoleHeightEstimatorsForIds(state, chatElement, m
 }
 
 function updateLongChatDomRenderRoleHeightEstimators(state, elements, chat, width = window.innerWidth) {
+    if (isLongChatDomRenderGenerationActive()) {
+        return;
+    }
+
     if (!state || !Array.isArray(chat)) {
         return;
     }
@@ -1412,6 +1408,18 @@ function applyLongChatDomRenderToMessage(element, chat, refreshStats = null, opt
     const applySignature = getLongChatDomRenderApplySignature(record, chars, options.chatWidth, role);
     const appliedHeight = element.style.getPropertyValue(LONG_CHAT_DOM_RENDER_HEIGHT_VAR);
 
+    if (element.classList.contains('bai-bai-toolkit-long-chat-contained') && appliedHeight) {
+        if (record) {
+            record.appliedSignature = applySignature;
+            record.contained = true;
+            record.role = role;
+        }
+        if (refreshStats) {
+            refreshStats.skipped += 1;
+        }
+        return;
+    }
+
     if (
         record
         && record.appliedSignature === applySignature
@@ -1425,7 +1433,7 @@ function applyLongChatDomRenderToMessage(element, chat, refreshStats = null, opt
         return;
     }
 
-    const measuredHeight = element.classList.contains('bai-bai-toolkit-long-chat-contained')
+    const measuredHeight = element.classList.contains('bai-bai-toolkit-long-chat-contained') || isLongChatDomRenderGenerationActive()
         ? 0
         : measureLongChatDomRenderMessageHeight(element);
     const cachedHeight = getLongChatDomRenderCachedHeight(mesId);
@@ -1544,6 +1552,10 @@ function measureLongChatDomRenderMessageHeight(element) {
 
 function updateLongChatDomRenderHeightCache(target, observedHeight) {
     if (!(target instanceof HTMLElement) || !target.classList.contains('mes')) {
+        return;
+    }
+
+    if (target.style.getPropertyValue(LONG_CHAT_DOM_RENDER_HEIGHT_VAR)) {
         return;
     }
 
