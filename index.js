@@ -22,7 +22,7 @@ import { sendMessageAs } from '../../../slash-commands.js';
 import { isAdmin } from '../../../user.js';
 import { debounce, download, getFileText, regexFromString, resetScrollHeight, setInfoBlock, uuidv4 } from '../../../utils.js';
 import { getCurrentPresetAPI as getRegexCurrentPresetAPI, getCurrentPresetName as getRegexCurrentPresetName, getScriptsByType as getRegexScriptsByType, runRegexScript, SCRIPT_TYPES as REGEX_SCRIPT_TYPES, substitute_find_regex } from '../../regex/engine.js';
-const CURRENT_VERSION = '0.26.1';
+const CURRENT_VERSION = '0.26.3';
 const LOCAL_ASSET_VERSION = getLocalAssetVersion(CURRENT_VERSION);
 const { SaveGenerateDisplay } = await importVersionedLocalModule('./saveGenerateDisplay.js');
 const chatOptimizations = await importVersionedLocalModule('./chatOptimizations.js');
@@ -42,6 +42,7 @@ const BAIBAOKU_FAST_CONFIG_URL = '/api/plugins/baibaoku/v1/fast-config';
 const BAIBAOKU_FAST_CHAT_GET_URL = '/api/plugins/baibaoku/v1/chats/fast-get';
 const BAIBAOKU_THEME_GET_URL = '/api/plugins/baibaoku/v1/themes/get';
 const BAIBAOKU_REQUIRED_BACKEND_VERSION = '0.4.3';
+const BAIBAOKU_PRESET_AUTO_BACKUP_MIN_VERSION = '0.4.4';
 const BAIBAOKU_THEME_LOADING_STYLE_ID = 'bai_bai_toolkit_theme_loading_style';
 const BAIBAOKU_THEME_LOADING_HOST_CLASS = 'bai-bai-toolkit-theme-loading-host';
 const BAIBAOKU_THEME_LOADING_OVERLAY_CLASS = 'bai-bai-toolkit-theme-loading-overlay';
@@ -345,6 +346,7 @@ const defaultSettings = {
     saveGenerateEnabled: true,
     tokenizerBulkCountEnabled: true,
     extensionManifestBundleEnabled: true,
+    presetAutoBackupEnabled: true,
     characterListAvatarLazyLoadEnabled: true,
     fastChatListEnabled: true,
     welcomeRecentChatDirectOpenEnabled: true,
@@ -2824,6 +2826,15 @@ async function renderSettingsPanel() {
             applyBaibaokuPanelLocalState(container);
         });
 
+    $('#bai_bai_toolkit_preset_auto_backup_enabled')
+        .prop('checked', settings.presetAutoBackupEnabled !== false)
+        .on('input', function () {
+            settings.presetAutoBackupEnabled = Boolean($(this).prop('checked'));
+            saveExtensionSettings();
+            presetOptimizations.applyPresetAutoBackup();
+            applyBaibaokuPanelLocalState(container);
+        });
+
     $('#bai_bai_toolkit_tokenizer_bulk_count_enabled')
         .prop('checked', settings.tokenizerBulkCountEnabled)
         .on('input', async function () {
@@ -2897,6 +2908,12 @@ async function renderSettingsPanel() {
 }
 
 function initializeBaibaokuPanel(container) {
+    container.find('#bai_bai_toolkit_baibaoku_install_help')
+        .off('click.baiBaiToolkitBaibaokuInstallHelp')
+        .on('click.baiBaiToolkitBaibaokuInstallHelp', () => {
+            showBaibaokuInstallHelpPrompt();
+        });
+
     container.find('#bai_bai_toolkit_baibaoku_refresh_status')
         .off('click.baiBaiToolkitBaibaokuStatus')
         .on('click.baiBaiToolkitBaibaokuStatus', () => {
@@ -2920,6 +2937,7 @@ function getBaibaokuPanelState() {
 function applyBaibaokuPanelLocalState(container) {
     const bridge = getBaibaokuEarlyBridge();
     const bridgeStatus = container.find('#bai_bai_toolkit_baibaoku_bridge_status');
+    const presetAutoBackupToggle = container.find('#bai_bai_toolkit_preset_auto_backup_enabled');
 
     const bridgeLabel = bridge?.installed
         ? `已注入${bridge.version ? ` v${bridge.version}` : ''}`
@@ -2939,10 +2957,13 @@ function applyBaibaokuPanelLocalState(container) {
         .prop('disabled', true);
     container.find('#bai_bai_toolkit_save_generate_enabled')
         .prop('checked', settings.saveGenerateEnabled === true);
+    presetAutoBackupToggle
+        .prop('checked', settings.presetAutoBackupEnabled !== false);
     container.find('#bai_bai_toolkit_tokenizer_bulk_count_enabled')
         .prop('checked', settings.tokenizerBulkCountEnabled !== false);
 
     applyCachedBaibaokuPanelStatus(container, getBaibaokuPanelState().cache);
+    applyPresetAutoBackupToggleAvailability(container, getBaibaokuPanelState().cache?.status);
 }
 
 function applyCachedBaibaokuPanelStatus(container, cache) {
@@ -2964,12 +2985,43 @@ function applyCachedBaibaokuPanelStatus(container, cache) {
     }
 
     if (cache.offline) {
-        updateBaibaokuStatusText(serverStatus, '未连接', false);
+        updateBaibaokuStatusText(serverStatus, '未安装', false);
         updateBaibaokuStatusText(driverStatus, '未知', false);
         return true;
     }
 
     return false;
+}
+
+function applyPresetAutoBackupToggleAvailability(container, status) {
+    const toggle = container.find('#bai_bai_toolkit_preset_auto_backup_enabled');
+    const label = toggle.closest('label');
+    const supported = isBaibaokuVersionAtLeast(status?.version, BAIBAOKU_PRESET_AUTO_BACKUP_MIN_VERSION);
+
+    presetOptimizations.setPresetAutoBackupBackendAvailable(supported);
+
+    if (!label.data('presetAutoBackupDefaultTitle')) {
+        label.data('presetAutoBackupDefaultTitle', label.attr('title') || '');
+    }
+
+    toggle.prop('disabled', !supported);
+    label
+        .toggleClass('disabled', !supported)
+        .css('opacity', supported ? '' : '0.55')
+        .attr('title', supported
+            ? label.data('presetAutoBackupDefaultTitle')
+            : `\u9884\u8bbe\u81ea\u52a8\u5907\u4efd\u9700\u8981\u67cf\u5b9d\u5e93 v${BAIBAOKU_PRESET_AUTO_BACKUP_MIN_VERSION} \u6216\u66f4\u9ad8\u7248\u672c`);
+}
+
+function isBaibaokuVersionAtLeast(version, minimumVersion) {
+    version = String(version || '').trim();
+    minimumVersion = String(minimumVersion || '').trim();
+
+    if (!version || !minimumVersion) {
+        return false;
+    }
+
+    return !isVersionGreater(minimumVersion, version);
 }
 
 async function refreshBaibaokuPanelStatus(container, { force = false } = {}) {
@@ -3061,6 +3113,7 @@ async function refreshBaibaokuPanelStatus(container, { force = false } = {}) {
         updateBaibaokuStatusText(driverStatus, driver?.available
             ? `可用${driver.package ? ` (${driver.package})` : ''}`
             : '不可用', Boolean(driver?.available));
+        applyPresetAutoBackupToggleAvailability(container, status);
         void maybeShowBaibaokuBackendUpdatePrompt(status);
 
         try {
@@ -3120,8 +3173,9 @@ async function refreshBaibaokuPanelStatus(container, { force = false } = {}) {
         }
     } catch {
         markSaveGenerateBackendAvailable(globalThis[SAVE_GENERATE_FETCH_KEY], false);
-        updateBaibaokuStatusText(serverStatus, '未连接', false);
+        updateBaibaokuStatusText(serverStatus, '未安装', false);
         updateBaibaokuStatusText(driverStatus, '未知', false);
+        applyPresetAutoBackupToggleAvailability(container, null);
     }
     if (!refreshed) {
         panelState.cache = {
@@ -3184,6 +3238,14 @@ async function maybeShowBaibaokuBackendUpdatePrompt(status) {
     await extensionState.baibaokuBackendUpdatePromptPromise;
 }
 
+function showBaibaokuInstallHelpPrompt() {
+    callGenericPopup('请看帖子标注内容', POPUP_TYPE.TEXT, '', {
+        okButton: '知道了',
+    }).catch(error => {
+        console.debug(`${LOG_PREFIX} Failed to show BaiBaoKu install help prompt`, error);
+    });
+}
+
 async function fetchBaibaokuFastConfig() {
     const response = await fetch(BAIBAOKU_FAST_CONFIG_URL, {
         method: 'GET',
@@ -3221,11 +3283,21 @@ async function saveBaibaokuFastConfig(config) {
 
 function updateBaibaokuStatusText(element, text, ok) {
     element.text(text);
-    element.css('color', ok === null
+    const color = ok === null
         ? ''
         : ok
             ? 'var(--SmartThemeQuoteColor)'
-            : 'var(--SmartThemeEmColor)');
+            : '#ff4d4f';
+    element.each((_, node) => {
+        if (!node?.style) {
+            return;
+        }
+        if (color) {
+            node.style.setProperty('color', color, 'important');
+        } else {
+            node.style.removeProperty('color');
+        }
+    });
 }
 
 async function initializeUpdateUI(container) {
@@ -3306,6 +3378,8 @@ function applyFeatureSettings() {
     presetOptimizations.applyPresetScrollOptimization();
     presetOptimizations.applyPresetDragOptimization();
     presetOptimizations.applyPresetGrouping();
+    presetOptimizations.applyPresetBackupPreviewUi();
+    presetOptimizations.applyPresetAutoBackup();
     presetOptimizations.applyPresetSwitchOptimization();
     presetOptimizations.applyPresetToggleOptimization();
     presetOptimizations.applyPresetPromptCodeMirrorEditorOptimization();

@@ -218,17 +218,25 @@
                         <legend style="font-size: 0.9em; font-weight: bold; opacity: 0.8;"><i class="fa-solid fa-box-archive"></i> 柏宝库</legend>
                         <div class="flex-container flexFlowColumn" style="gap: 5px;">
                             <div style="border: 1px solid var(--SmartThemeBorderColor); border-radius: 5px; padding: 6px 8px; margin-bottom: 4px;">
-                                <div class="flex-container justifySpaceBetween alignItemCenter" style="gap: 8px; margin-bottom: 4px;">
-                                    <span style="font-weight: bold; opacity: 0.85;">连接状态</span>
-                                    <div id="bai_bai_toolkit_baibaoku_refresh_status" class="menu_button menu_button_icon" title="重新检测柏宝库连接状态">
-                                        <i class="fa-solid fa-rotate"></i>
-                                        <span>刷新</span>
+                                <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: start;">
+                                    <div class="flex-container flexFlowColumn" style="gap: 4px; min-width: 0;">
+                                        <span style="font-weight: bold; opacity: 0.85;">连接状态</span>
+                                        <div class="flex-container flexFlowColumn" style="gap: 2px; font-size: 0.9em; opacity: 0.9;">
+                                            <div>服务：<span id="bai_bai_toolkit_baibaoku_server_status">检测中</span></div>
+                                            <div>数据库：<span id="bai_bai_toolkit_baibaoku_driver_status">检测中</span></div>
+                                            <div>Early Bridge：<span id="bai_bai_toolkit_baibaoku_bridge_status">检测中</span></div>
+                                        </div>
                                     </div>
-                                </div>
-                                <div class="flex-container flexFlowColumn" style="gap: 2px; font-size: 0.9em; opacity: 0.9;">
-                                    <div>服务：<span id="bai_bai_toolkit_baibaoku_server_status">检测中</span></div>
-                                    <div>数据库：<span id="bai_bai_toolkit_baibaoku_driver_status">检测中</span></div>
-                                    <div>Early Bridge：<span id="bai_bai_toolkit_baibaoku_bridge_status">检测中</span></div>
+                                    <div class="flex-container flexFlowColumn alignItemCenter" style="gap: 5px; justify-self: end;">
+                                        <div id="bai_bai_toolkit_baibaoku_refresh_status" class="menu_button menu_button_icon" title="重新检测柏宝库连接状态">
+                                            <i class="fa-solid fa-rotate"></i>
+                                            <span>刷新</span>
+                                        </div>
+                                        <div id="bai_bai_toolkit_baibaoku_install_help" class="menu_button menu_button_icon" title="说明">
+                                            <i class="fa-solid fa-circle-question"></i>
+                                            <span>说明</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <label class="checkbox_label" for="bai_bai_toolkit_baibaoku_settings_acceleration_enabled"
@@ -260,6 +268,11 @@
                                 title="普通单角色 Chat Completion 回复改用柏宝库 save-generate，后端生成完成后自动写入聊天文件；保存失败时保留 SillyTavern 原生保存兜底。">
                                 <input id="bai_bai_toolkit_save_generate_enabled" type="checkbox" class="checkbox">
                                 <span>消息后台生成</span>
+                            </label>
+                            <label class="checkbox_label" for="bai_bai_toolkit_preset_auto_backup_enabled"
+                                title="&#x76D1;&#x542C;&#x9884;&#x8BBE;&#x4FDD;&#x5B58;&#x8BF7;&#x6C42;&#xFF0C;&#x5E76;&#x5C06;&#x540C;&#x4E00;&#x4EFD;&#x9884;&#x8BBE;&#x6570;&#x636E;&#x53D1;&#x9001;&#x5230;&#x67CF;&#x5B9D;&#x5E93;&#x540E;&#x7AEF;&#x5907;&#x4EFD;&#x63A5;&#x53E3;&#xFF1B;&#x4E0D;&#x4F1A;&#x62E6;&#x622A;&#x6216;&#x7B49;&#x5F85;&#x539F;&#x59CB;&#x4FDD;&#x5B58;&#x8BF7;&#x6C42;&#x3002;">
+                                <input id="bai_bai_toolkit_preset_auto_backup_enabled" type="checkbox" class="checkbox">
+                                <span>&#x9884;&#x8BBE;&#x81EA;&#x52A8;&#x5907;&#x4EFD;</span>
                             </label>
                             <label class="checkbox_label" for="bai_bai_toolkit_tokenizer_bulk_count_enabled"
                                 title="刷新 Prompt Manager token 统计时使用 BaiBaoKu 批量计数接口，减少切换模型时的 token 计算请求。">
