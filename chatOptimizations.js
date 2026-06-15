@@ -48,6 +48,7 @@ const LONG_CHAT_DOM_RENDER_ESTIMATE_EXTRA_PX = 80;
 const LONG_CHAT_DOM_RENDER_ESTIMATE_MAX_HEIGHT = 80000;
 const LONG_CHAT_DOM_RENDER_ESTIMATOR_ALPHA = 0.35;
 const LONG_CHAT_DOM_RENDER_ESTIMATOR_MAX_SCALE = 4;
+const LONG_CHAT_DOM_RENDER_FORCE_DISABLED = true;
 const LONG_CHAT_DOM_RENDER_BOTTOM_ANCHOR_CLASS = 'bai-bai-toolkit-long-chat-bottom-anchor';
 const LONG_CHAT_DOM_RENDER_BOTTOM_ANCHORED_CLASS = 'bai-bai-toolkit-long-chat-bottom-anchored';
 const LONG_CHAT_DOM_RENDER_HEIGHT_VAR = '--bai-bai-toolkit-long-chat-mes-height';
@@ -125,8 +126,16 @@ export function bindChatOptimizationSettings({ saveSettings } = {}) {
         });
 
     $('#bai_bai_toolkit_long_chat_dom_render_optimization_enabled')
-        .prop('checked', settings.longChatDomRenderOptimizationEnabled)
+        .prop('checked', settings.longChatDomRenderOptimizationEnabled && !LONG_CHAT_DOM_RENDER_FORCE_DISABLED)
+        .prop('disabled', LONG_CHAT_DOM_RENDER_FORCE_DISABLED)
         .on('input', function () {
+            if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED) {
+                settings.longChatDomRenderOptimizationEnabled = false;
+                $(this).prop('checked', false);
+                persistSettings();
+                applyLongChatDomRenderOptimization();
+                return;
+            }
             settings.longChatDomRenderOptimizationEnabled = Boolean($(this).prop('checked'));
             persistSettings();
             applyLongChatDomRenderOptimization();
@@ -303,6 +312,10 @@ function calculateVisibleMessageTextStats(chat, visibleMessages = [...document.q
 }
 
 function getLongChatDomRenderSnapshot() {
+    if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED) {
+        return 'longDom=disabled';
+    }
+
     if (!settings.longChatDomRenderOptimizationEnabled) {
         return 'longDom=off';
     }
@@ -318,7 +331,7 @@ function getLongChatDomRenderSnapshot() {
 }
 
 function applyLongChatDomRenderOptimization() {
-    if (!settings.longChatDomRenderOptimizationEnabled) {
+    if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED || !settings.longChatDomRenderOptimizationEnabled) {
         removeLongChatDomRenderOptimization();
         return;
     }
@@ -542,7 +555,7 @@ function detachLongChatDomRenderChatObservers() {
 }
 
 function scheduleLongChatDomRenderRefresh({ autoScroll = false, reason = '', mode = 'full', messageIds = [] } = {}) {
-    if (!settings.longChatDomRenderOptimizationEnabled) {
+    if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED || !settings.longChatDomRenderOptimizationEnabled) {
         return;
     }
 
@@ -582,7 +595,7 @@ function scheduleLongChatDomRenderRefresh({ autoScroll = false, reason = '', mod
 }
 
 function refreshLongChatDomRenderOptimization({ reason = '', mode = 'full', messageIds = [] } = {}) {
-    if (!settings.longChatDomRenderOptimizationEnabled) {
+    if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED || !settings.longChatDomRenderOptimizationEnabled) {
         return;
     }
 
@@ -1425,6 +1438,7 @@ function isLongChatDomRenderOptimizedChat(chat) {
 function shouldStartLongChatDomRenderGenerationAnchor() {
     const chat = document.querySelector('#chat');
     return chat instanceof HTMLElement
+        && !LONG_CHAT_DOM_RENDER_FORCE_DISABLED
         && settings.longChatDomRenderOptimizationEnabled
         && !isWelcomePageDisplayed(chat)
         && isLongChatDomRenderOptimizedChat(chat)
@@ -1434,6 +1448,7 @@ function shouldStartLongChatDomRenderGenerationAnchor() {
 function shouldScrollLongChatDomRenderToLatestMessageStartAfterGeneration(state = getLongChatDomRenderState()) {
     const chat = document.querySelector('#chat');
     return chat instanceof HTMLElement
+        && !LONG_CHAT_DOM_RENDER_FORCE_DISABLED
         && settings.longChatDomRenderOptimizationEnabled
         && !isWelcomePageDisplayed(chat)
         && isLongChatDomRenderOptimizedChat(chat)
@@ -1442,7 +1457,7 @@ function shouldScrollLongChatDomRenderToLatestMessageStartAfterGeneration(state 
 }
 
 function scheduleLongChatDomRenderGenerationAnchor() {
-    if (!settings.longChatDomRenderOptimizationEnabled) {
+    if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED || !settings.longChatDomRenderOptimizationEnabled) {
         return;
     }
 
@@ -1465,6 +1480,7 @@ function updateLongChatDomRenderGenerationAnchor() {
     const chat = document.querySelector('#chat');
 
     if (!(chat instanceof HTMLElement)
+        || LONG_CHAT_DOM_RENDER_FORCE_DISABLED
         || !settings.longChatDomRenderOptimizationEnabled
         || isWelcomePageDisplayed(chat)
         || !isLongChatDomRenderGenerationActive()
@@ -1568,6 +1584,7 @@ function settleLongChatDomRenderScrollToBottom(token, reason = '') {
 
     if (!(chat instanceof HTMLElement)
         || token !== state.autoScrollToken
+        || LONG_CHAT_DOM_RENDER_FORCE_DISABLED
         || !settings.longChatDomRenderOptimizationEnabled
         || isWelcomePageDisplayed(chat)
         || state.userScrolledAway) {
@@ -1681,6 +1698,7 @@ function settleLongChatDomRenderScrollToLatestMessageStart(token, reason = '') {
 
     if (!(chat instanceof HTMLElement)
         || token !== state.autoScrollToken
+        || LONG_CHAT_DOM_RENDER_FORCE_DISABLED
         || !settings.longChatDomRenderOptimizationEnabled
         || isWelcomePageDisplayed(chat)
         || state.userScrolledAway) {

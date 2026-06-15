@@ -354,7 +354,7 @@ const defaultSettings = {
     welcomeRecentChatDirectOpenEnabled: true,
     saveRequestGzipEnabled: true,
     translateMessageUpdatedOptimizationEnabled: true,
-    longChatDomRenderOptimizationEnabled: true,
+    longChatDomRenderOptimizationEnabled: false,
     chatListScrollOptimizationEnabled: true,
     chatListAutoClearEnabled: true,
     mobileAutoKeyboardSuppressionEnabled: true,
