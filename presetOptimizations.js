@@ -7656,6 +7656,12 @@ function applyPresetPromptFavoritesToMemory(presetName, favoritesState) {
 }
 
 function readCurrentPresetExtensionField(path) {
+    const settingsValue = getObjectPath(oai_settings?.extensions, path);
+
+    if (settingsValue !== null && settingsValue !== undefined) {
+        return settingsValue;
+    }
+
     const presetName = oai_settings?.preset_settings_openai;
     const presetManager = getPresetManager('openai');
 
@@ -7666,12 +7672,6 @@ function readCurrentPresetExtensionField(path) {
         if (presetValue !== null && presetValue !== undefined) {
             return presetValue;
         }
-    }
-
-    const settingsValue = getObjectPath(oai_settings?.extensions, path);
-
-    if (settingsValue !== null && settingsValue !== undefined) {
-        return settingsValue;
     }
 
     return null;
