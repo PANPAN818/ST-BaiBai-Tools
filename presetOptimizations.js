@@ -8323,7 +8323,7 @@ async function deletePresetVuePromptGroup(groupId) {
 }
 
 function renderPresetVuePromptControls(h, prompt, item, { favoriteMirror = false } = {}) {
-    const canDelete = promptManager.isPromptDeletionAllowed?.(prompt) ?? false === prompt.system_prompt;
+    const canDelete = true;
     const canEdit = promptManager.isPromptEditAllowed?.(prompt) ?? (FORCE_EDIT_PROMPTS.has(prompt.identifier) || !prompt.marker);
     const canToggle = promptManager.isPromptToggleAllowed?.(prompt) ?? (
         prompt.marker && !FORCE_TOGGLE_PROMPTS.has(prompt.identifier)
@@ -11179,7 +11179,7 @@ async function renderPromptManagerListItemsFast() {
         });
 
         const calculatedTokens = tokens ? tokens : '-';
-        const canDelete = false === prompt.system_prompt;
+        const canDelete = true;
         const canEdit = FORCE_EDIT_PROMPTS.has(prompt.identifier) || !prompt.marker;
         const canToggle = prompt.marker && !FORCE_TOGGLE_PROMPTS.has(prompt.identifier)
             ? false
