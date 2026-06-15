@@ -23,6 +23,7 @@ const CHAT_DELETE_MESSAGE_DELETED_HANDLER_KEY = '__baiBaiToolkitChatDeleteMessag
 const CHAT_DELETE_GENERATION_ACTION_HANDLER_KEY = '__baiBaiToolkitChatDeleteGenerationActionHandler';
 const WELCOME_RECENT_CHAT_DIRECT_OPEN_HANDLER_KEY = '__baiBaiToolkitWelcomeRecentChatDirectOpenHandler';
 const WELCOME_RECENT_CHAT_DIRECT_OPEN_CURRENT_HANDLER_KEY = '__baiBaiToolkitWelcomeRecentChatDirectOpenCurrentHandler';
+const MESSAGE_COMPLETION_SCROLL_HANDLER_KEY = '__baiBaiToolkitMessageCompletionScrollHandler';
 const MOBILE_AUTO_KEYBOARD_HANDLER_KEY = '__baiBaiToolkitMobileAutoKeyboardHandler';
 const MOBILE_AUTO_KEYBOARD_FOCUS_PATCH_KEY = '__baiBaiToolkitMobileAutoKeyboardFocusPatched';
 const MOBILE_AUTO_KEYBOARD_JQUERY_FOCUS_PATCH_KEY = '__baiBaiToolkitMobileAutoKeyboardJQueryFocusPatched';
@@ -48,6 +49,7 @@ const LONG_CHAT_DOM_RENDER_ESTIMATE_EXTRA_PX = 80;
 const LONG_CHAT_DOM_RENDER_ESTIMATE_MAX_HEIGHT = 80000;
 const LONG_CHAT_DOM_RENDER_ESTIMATOR_ALPHA = 0.35;
 const LONG_CHAT_DOM_RENDER_ESTIMATOR_MAX_SCALE = 4;
+const LONG_CHAT_DOM_RENDER_FORCE_DISABLED = false;
 const LONG_CHAT_DOM_RENDER_BOTTOM_ANCHOR_CLASS = 'bai-bai-toolkit-long-chat-bottom-anchor';
 const LONG_CHAT_DOM_RENDER_BOTTOM_ANCHORED_CLASS = 'bai-bai-toolkit-long-chat-bottom-anchored';
 const LONG_CHAT_DOM_RENDER_HEIGHT_VAR = '--bai-bai-toolkit-long-chat-mes-height';
@@ -125,11 +127,27 @@ export function bindChatOptimizationSettings({ saveSettings } = {}) {
         });
 
     $('#bai_bai_toolkit_long_chat_dom_render_optimization_enabled')
-        .prop('checked', settings.longChatDomRenderOptimizationEnabled)
+        .prop('checked', settings.longChatDomRenderOptimizationEnabled && !LONG_CHAT_DOM_RENDER_FORCE_DISABLED)
+        .prop('disabled', LONG_CHAT_DOM_RENDER_FORCE_DISABLED)
         .on('input', function () {
+            if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED) {
+                settings.longChatDomRenderOptimizationEnabled = false;
+                $(this).prop('checked', false);
+                persistSettings();
+                applyLongChatDomRenderOptimization();
+                return;
+            }
             settings.longChatDomRenderOptimizationEnabled = Boolean($(this).prop('checked'));
             persistSettings();
             applyLongChatDomRenderOptimization();
+        });
+
+    $('#bai_bai_toolkit_message_completion_scroll_to_middle_enabled')
+        .prop('checked', settings.messageCompletionScrollToMiddleEnabled !== false)
+        .on('input', function () {
+            settings.messageCompletionScrollToMiddleEnabled = Boolean($(this).prop('checked'));
+            persistSettings();
+            applyMessageCompletionScrollToMiddle();
         });
 
     $('#bai_bai_toolkit_chat_list_scroll_optimization_enabled')
@@ -303,6 +321,10 @@ function calculateVisibleMessageTextStats(chat, visibleMessages = [...document.q
 }
 
 function getLongChatDomRenderSnapshot() {
+    if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED) {
+        return 'longDom=disabled';
+    }
+
     if (!settings.longChatDomRenderOptimizationEnabled) {
         return 'longDom=off';
     }
@@ -317,8 +339,274 @@ function getLongChatDomRenderSnapshot() {
     return `longDom=${optimized ? 'on' : 'idle'}:${contained}`;
 }
 
+function applyMessageCompletionScrollToMiddle() {
+    if (settings.messageCompletionScrollToMiddleEnabled === false) {
+        removeMessageCompletionScrollToMiddle();
+        return;
+    }
+
+    installMessageCompletionScrollToMiddle();
+}
+
+function getMessageCompletionScrollState() {
+    if (!extensionState[MESSAGE_COMPLETION_SCROLL_HANDLER_KEY] || typeof extensionState[MESSAGE_COMPLETION_SCROLL_HANDLER_KEY] !== 'object') {
+        extensionState[MESSAGE_COMPLETION_SCROLL_HANDLER_KEY] = {};
+    }
+
+    const state = extensionState[MESSAGE_COMPLETION_SCROLL_HANDLER_KEY];
+    if (!Array.isArray(state.eventHandlers)) {
+        state.eventHandlers = [];
+    }
+    if (!Array.isArray(state.timers)) {
+        state.timers = [];
+    }
+
+    return state;
+}
+
+function installMessageCompletionScrollToMiddle() {
+    const state = getMessageCompletionScrollState();
+    if (state.installed || typeof eventSource?.on !== 'function') {
+        ensureMessageCompletionScrollChatListener(state);
+        return;
+    }
+
+    applyLongChatDomRenderOptimizationStyle();
+
+    const generationStartedHandler = () => {
+        handleMessageCompletionScrollGenerationStarted(state);
+    };
+    const generationEndedHandler = (reason = 'generation-ended') => {
+        handleMessageCompletionScrollGenerationEnded(state, reason);
+    };
+    const messageRenderedHandler = () => {
+        updateMessageCompletionScrollBottomAnchor(state, 'message-rendered');
+    };
+
+    addMessageCompletionScrollEventHandler(event_types.GENERATION_STARTED, generationStartedHandler);
+    addMessageCompletionScrollEventHandler(event_types.USER_MESSAGE_RENDERED, messageRenderedHandler);
+    addMessageCompletionScrollEventHandler(event_types.CHARACTER_MESSAGE_RENDERED, messageRenderedHandler);
+    addMessageCompletionScrollEventHandler(event_types.GENERATION_STOPPED, () => generationEndedHandler('generation-stopped'));
+    addMessageCompletionScrollEventHandler(event_types.GENERATION_ENDED, () => generationEndedHandler('generation-ended'));
+
+    state.installed = true;
+    ensureMessageCompletionScrollChatListener(state);
+}
+
+function addMessageCompletionScrollEventHandler(event, handler) {
+    if (!event || typeof handler !== 'function' || typeof eventSource?.on !== 'function') {
+        return;
+    }
+
+    const state = getMessageCompletionScrollState();
+    eventSource.on(event, handler);
+    state.eventHandlers.push({ event, handler });
+}
+
+function removeMessageCompletionScrollToMiddle() {
+    const state = getMessageCompletionScrollState();
+    for (const entry of state.eventHandlers || []) {
+        eventSource.removeListener?.(entry.event, entry.handler);
+    }
+
+    state.eventHandlers = [];
+    state.installed = false;
+    state.generationActive = false;
+    state.shouldScroll = false;
+    state.userInteracted = false;
+    clearTimeout(state.anchorTimer);
+    state.anchorTimer = null;
+    clearMessageCompletionScrollTimers(state);
+    removeLongChatDomRenderBottomAnchor(state);
+    detachMessageCompletionScrollChatListener(state);
+}
+
+function handleMessageCompletionScrollGenerationStarted(state = getMessageCompletionScrollState()) {
+    if (settings.messageCompletionScrollToMiddleEnabled === false) {
+        return;
+    }
+
+    ensureMessageCompletionScrollChatListener(state);
+    const chat = document.querySelector('#chat');
+    state.generationToken = Number(state.generationToken || 0) + 1;
+    state.scrolledToken = 0;
+    state.generationActive = true;
+    state.userInteracted = false;
+    state.shouldScroll = chat instanceof HTMLElement
+        && !isWelcomePageDisplayed(chat)
+        && isLongChatDomRenderAtBottom(chat);
+
+    if (state.shouldScroll) {
+        updateMessageCompletionScrollBottomAnchor(state, 'generation-started');
+    }
+}
+
+function handleMessageCompletionScrollGenerationEnded(state = getMessageCompletionScrollState(), reason = 'generation-ended') {
+    if (settings.messageCompletionScrollToMiddleEnabled === false || state.scrolledToken === state.generationToken) {
+        state.generationActive = false;
+        return;
+    }
+
+    const chat = document.querySelector('#chat');
+    const shouldScroll = Boolean(
+        !state.userInteracted
+        && (
+            (state.generationActive && state.shouldScroll)
+            || (chat instanceof HTMLElement && !isWelcomePageDisplayed(chat) && isLongChatDomRenderAtBottom(chat))
+        ),
+    );
+    state.generationActive = false;
+    state.shouldScroll = false;
+    state.scrolledToken = state.generationToken;
+    clearTimeout(state.anchorTimer);
+    state.anchorTimer = null;
+
+    if (shouldScroll) {
+        scheduleMessageCompletionScrollToMiddle(state, reason);
+    } else {
+        removeLongChatDomRenderBottomAnchor(state);
+    }
+}
+
+function updateMessageCompletionScrollBottomAnchor(state = getMessageCompletionScrollState(), reason = '') {
+    if (!state.generationActive
+        || !state.shouldScroll
+        || state.userInteracted
+        || settings.messageCompletionScrollToMiddleEnabled === false) {
+        removeLongChatDomRenderBottomAnchor(state);
+        return;
+    }
+
+    const chat = document.querySelector('#chat');
+    if (!(chat instanceof HTMLElement) || isWelcomePageDisplayed(chat)) {
+        return;
+    }
+
+    ensureLongChatDomRenderBottomAnchor(chat, state);
+    clearTimeout(state.anchorTimer);
+    state.anchorTimer = setTimeout(() => {
+        state.anchorTimer = null;
+        updateMessageCompletionScrollBottomAnchor(state, reason);
+    }, 120);
+}
+
+function ensureMessageCompletionScrollChatListener(state = getMessageCompletionScrollState()) {
+    const chat = document.querySelector('#chat');
+    if (!(chat instanceof HTMLElement)) {
+        detachMessageCompletionScrollChatListener(state);
+        return;
+    }
+
+    if (state.chatElement === chat && state.userInteractionHandler) {
+        return;
+    }
+
+    detachMessageCompletionScrollChatListener(state);
+    state.chatElement = chat;
+    state.userInteractionHandler = () => {
+        if (!state.generationActive) {
+            return;
+        }
+        state.userInteracted = true;
+    };
+    chat.addEventListener('wheel', state.userInteractionHandler, { passive: true });
+    chat.addEventListener('touchstart', state.userInteractionHandler, { passive: true });
+    chat.addEventListener('pointerdown', state.userInteractionHandler, { passive: true });
+}
+
+function detachMessageCompletionScrollChatListener(state = getMessageCompletionScrollState()) {
+    if (state.chatElement instanceof HTMLElement && state.userInteractionHandler) {
+        state.chatElement.removeEventListener('wheel', state.userInteractionHandler);
+        state.chatElement.removeEventListener('touchstart', state.userInteractionHandler);
+        state.chatElement.removeEventListener('pointerdown', state.userInteractionHandler);
+    }
+    state.chatElement = null;
+    state.userInteractionHandler = null;
+}
+
+function scheduleMessageCompletionScrollToMiddle(state = getMessageCompletionScrollState(), reason = '') {
+    clearMessageCompletionScrollTimers(state);
+    const token = Number(state.generationToken || 0);
+    state.scrollStartedAt = performance.now();
+    state.lastScrollHeight = 0;
+    state.lastTargetTop = null;
+    state.stableFrames = 0;
+
+    settleMessageCompletionScrollToLatestMessageStart(state, token, reason);
+}
+
+function clearMessageCompletionScrollTimers(state = getMessageCompletionScrollState()) {
+    clearTimeout(state.anchorTimer);
+    state.anchorTimer = null;
+
+    for (const timer of state.timers || []) {
+        clearTimeout(timer);
+    }
+    state.timers = [];
+
+    if (state.frame) {
+        cancelAnimationFrame(state.frame);
+        state.frame = 0;
+    }
+}
+
+function settleMessageCompletionScrollToLatestMessageStart(state = getMessageCompletionScrollState(), token, reason = '') {
+    if (token !== Number(state.generationToken || 0)
+        || settings.messageCompletionScrollToMiddleEnabled === false
+        || state.userInteracted) {
+        return;
+    }
+
+    const settled = scrollLatestMessageToMiddleAfterCompletion(state, reason);
+    if (settled) {
+        return;
+    }
+
+    state.frame = requestAnimationFrame(() => {
+        state.frame = 0;
+        settleMessageCompletionScrollToLatestMessageStart(state, token, reason);
+    });
+}
+
+function scrollLatestMessageToMiddleAfterCompletion(state = getMessageCompletionScrollState(), reason = '') {
+    const chat = document.querySelector('#chat');
+    if (!(chat instanceof HTMLElement) || isWelcomePageDisplayed(chat) || state.userInteracted) {
+        return true;
+    }
+
+    const latestMessage = getLongChatDomRenderLatestMessageElement(chat);
+    if (!(latestMessage instanceof HTMLElement)) {
+        return false;
+    }
+
+    removeLongChatDomRenderBottomAnchor(state);
+    const now = performance.now();
+    const targetTop = getLongChatDomRenderLatestMessageStartScrollTop(chat, latestMessage);
+    const distance = Math.abs(chat.scrollTop - targetTop);
+    const heightDelta = Math.abs(Number(state.lastScrollHeight || 0) - chat.scrollHeight);
+    const targetDelta = Number.isFinite(state.lastTargetTop)
+        ? Math.abs(Number(state.lastTargetTop) - targetTop)
+        : 0;
+
+    if (distance > LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_TOLERANCE) {
+        chat.scrollTop = targetTop;
+        state.stableFrames = 0;
+    } else if (heightDelta > LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_TOLERANCE || targetDelta > LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_TOLERANCE) {
+        state.stableFrames = 0;
+    } else {
+        state.stableFrames = Number(state.stableFrames || 0) + 1;
+    }
+
+    state.lastScrollHeight = chat.scrollHeight;
+    state.lastTargetTop = targetTop;
+    state.lastScrollReason = reason;
+
+    return now - Number(state.scrollStartedAt || now) >= LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_SETTLE_MS
+        || Number(state.stableFrames || 0) >= LONG_CHAT_DOM_RENDER_SCROLL_BOTTOM_STABLE_FRAMES;
+}
+
 function applyLongChatDomRenderOptimization() {
-    if (!settings.longChatDomRenderOptimizationEnabled) {
+    if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED || !settings.longChatDomRenderOptimizationEnabled) {
         removeLongChatDomRenderOptimization();
         return;
     }
@@ -368,15 +656,12 @@ function installLongChatDomRenderOptimization() {
         };
         const chatMutationHandler = (reason = 'chat-update') => {
             scheduleLongChatDomRenderRefresh({ autoScroll: false, reason, mode: 'full' });
-            scheduleLongChatDomRenderGenerationAnchor('chat-update');
         };
         const messageRenderedHandler = (messageId) => {
             scheduleLongChatDomRenderRefresh({ autoScroll: false, reason: 'message-rendered', mode: 'incremental', messageIds: [messageId] });
-            scheduleLongChatDomRenderGenerationAnchor('message-rendered');
         };
         const messageUpdatedHandler = (messageId) => {
             scheduleLongChatDomRenderRefresh({ autoScroll: false, reason: 'message-updated', mode: 'incremental', messageIds: [messageId] });
-            scheduleLongChatDomRenderGenerationAnchor('message-updated');
         };
         const messageDeletedHandler = () => {
             pruneLongChatDomRenderCurrentChatHeightCache();
@@ -384,20 +669,13 @@ function installLongChatDomRenderOptimization() {
         };
         const generationStartedHandler = () => {
             state.generationActive = true;
-            state.generationAnchorEnabled = shouldStartLongChatDomRenderGenerationAnchor();
-            if (state.generationAnchorEnabled) {
-                state.userScrolledAway = false;
-                scheduleLongChatDomRenderGenerationAnchor('generation-started');
-            }
+            state.generationAnchorEnabled = false;
             scheduleLongChatDomRenderRefresh({ autoScroll: false, reason: 'generation-started', mode: 'incremental', messageIds: [getLongChatDomRenderLatestMessageId()] });
         };
         const generationEndedHandler = () => {
-            const shouldScrollToLatestMessageStart = shouldScrollLongChatDomRenderToLatestMessageStartAfterGeneration(state);
             state.generationActive = false;
-            releaseLongChatDomRenderGenerationAnchor();
-            if (shouldScrollToLatestMessageStart) {
-                scheduleLongChatDomRenderScrollToLatestMessageStart('generation-ended');
-            }
+            state.generationAnchorEnabled = false;
+            removeLongChatDomRenderBottomAnchorIfIdle(state);
         };
 
         addLongChatDomRenderEventHandler(event_types.CHAT_CHANGED, chatLoadHandler);
@@ -452,7 +730,9 @@ function removeLongChatDomRenderOptimization() {
     state.mutationObserver?.disconnect();
     state.mutationObserver = null;
 
-    document.getElementById(LONG_CHAT_DOM_RENDER_STYLE_ID)?.remove();
+    if (settings.messageCompletionScrollToMiddleEnabled === false) {
+        document.getElementById(LONG_CHAT_DOM_RENDER_STYLE_ID)?.remove();
+    }
     cleanupLongChatDomRenderMessages();
 }
 
@@ -542,7 +822,7 @@ function detachLongChatDomRenderChatObservers() {
 }
 
 function scheduleLongChatDomRenderRefresh({ autoScroll = false, reason = '', mode = 'full', messageIds = [] } = {}) {
-    if (!settings.longChatDomRenderOptimizationEnabled) {
+    if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED || !settings.longChatDomRenderOptimizationEnabled) {
         return;
     }
 
@@ -582,7 +862,7 @@ function scheduleLongChatDomRenderRefresh({ autoScroll = false, reason = '', mod
 }
 
 function refreshLongChatDomRenderOptimization({ reason = '', mode = 'full', messageIds = [] } = {}) {
-    if (!settings.longChatDomRenderOptimizationEnabled) {
+    if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED || !settings.longChatDomRenderOptimizationEnabled) {
         return;
     }
 
@@ -660,9 +940,7 @@ function refreshLongChatDomRenderOptimization({ reason = '', mode = 'full', mess
     }
     updateLongChatDomRenderRoleHeightEstimators(state, uncontainedTailMessages, chat, chatWidth);
 
-    if (shouldOptimize && isLongChatDomRenderGenerationActive()) {
-        scheduleLongChatDomRenderGenerationAnchor(reason || 'refresh');
-    } else if (!shouldOptimize && state.generationAnchorEnabled) {
+    if (!shouldOptimize && state.generationAnchorEnabled) {
         state.generationAnchorEnabled = false;
         removeLongChatDomRenderBottomAnchorIfIdle(state);
     }
@@ -747,9 +1025,7 @@ function refreshLongChatDomRenderIncremental({ state, chatElement, chat, reason 
 
     state.tailMessageIds = nextTailMessageIds;
 
-    if (shouldOptimize && isLongChatDomRenderGenerationActive()) {
-        scheduleLongChatDomRenderGenerationAnchor(reason || 'refresh');
-    } else if (!shouldOptimize && state.generationAnchorEnabled) {
+    if (!shouldOptimize && state.generationAnchorEnabled) {
         state.generationAnchorEnabled = false;
         removeLongChatDomRenderBottomAnchorIfIdle(state);
     }
@@ -776,6 +1052,10 @@ function logLongChatDomRenderRefresh(stats, mode = 'full') {
 }
 
 function updateLongChatDomRenderRoleHeightEstimatorsForIds(state, chatElement, messageIds, chat, width) {
+    if (isLongChatDomRenderGenerationActive()) {
+        return;
+    }
+
     const elements = [];
 
     for (const mesId of messageIds || []) {
@@ -793,6 +1073,10 @@ function updateLongChatDomRenderRoleHeightEstimatorsForIds(state, chatElement, m
 }
 
 function updateLongChatDomRenderRoleHeightEstimators(state, elements, chat, width = window.innerWidth) {
+    if (isLongChatDomRenderGenerationActive()) {
+        return;
+    }
+
     if (!state || !Array.isArray(chat)) {
         return;
     }
@@ -1124,6 +1408,18 @@ function applyLongChatDomRenderToMessage(element, chat, refreshStats = null, opt
     const applySignature = getLongChatDomRenderApplySignature(record, chars, options.chatWidth, role);
     const appliedHeight = element.style.getPropertyValue(LONG_CHAT_DOM_RENDER_HEIGHT_VAR);
 
+    if (element.classList.contains('bai-bai-toolkit-long-chat-contained') && appliedHeight) {
+        if (record) {
+            record.appliedSignature = applySignature;
+            record.contained = true;
+            record.role = role;
+        }
+        if (refreshStats) {
+            refreshStats.skipped += 1;
+        }
+        return;
+    }
+
     if (
         record
         && record.appliedSignature === applySignature
@@ -1137,7 +1433,7 @@ function applyLongChatDomRenderToMessage(element, chat, refreshStats = null, opt
         return;
     }
 
-    const measuredHeight = element.classList.contains('bai-bai-toolkit-long-chat-contained')
+    const measuredHeight = element.classList.contains('bai-bai-toolkit-long-chat-contained') || isLongChatDomRenderGenerationActive()
         ? 0
         : measureLongChatDomRenderMessageHeight(element);
     const cachedHeight = getLongChatDomRenderCachedHeight(mesId);
@@ -1256,6 +1552,10 @@ function measureLongChatDomRenderMessageHeight(element) {
 
 function updateLongChatDomRenderHeightCache(target, observedHeight) {
     if (!(target instanceof HTMLElement) || !target.classList.contains('mes')) {
+        return;
+    }
+
+    if (target.style.getPropertyValue(LONG_CHAT_DOM_RENDER_HEIGHT_VAR)) {
         return;
     }
 
@@ -1425,6 +1725,7 @@ function isLongChatDomRenderOptimizedChat(chat) {
 function shouldStartLongChatDomRenderGenerationAnchor() {
     const chat = document.querySelector('#chat');
     return chat instanceof HTMLElement
+        && !LONG_CHAT_DOM_RENDER_FORCE_DISABLED
         && settings.longChatDomRenderOptimizationEnabled
         && !isWelcomePageDisplayed(chat)
         && isLongChatDomRenderOptimizedChat(chat)
@@ -1434,6 +1735,7 @@ function shouldStartLongChatDomRenderGenerationAnchor() {
 function shouldScrollLongChatDomRenderToLatestMessageStartAfterGeneration(state = getLongChatDomRenderState()) {
     const chat = document.querySelector('#chat');
     return chat instanceof HTMLElement
+        && !LONG_CHAT_DOM_RENDER_FORCE_DISABLED
         && settings.longChatDomRenderOptimizationEnabled
         && !isWelcomePageDisplayed(chat)
         && isLongChatDomRenderOptimizedChat(chat)
@@ -1442,7 +1744,7 @@ function shouldScrollLongChatDomRenderToLatestMessageStartAfterGeneration(state 
 }
 
 function scheduleLongChatDomRenderGenerationAnchor() {
-    if (!settings.longChatDomRenderOptimizationEnabled) {
+    if (LONG_CHAT_DOM_RENDER_FORCE_DISABLED || !settings.longChatDomRenderOptimizationEnabled) {
         return;
     }
 
@@ -1465,6 +1767,7 @@ function updateLongChatDomRenderGenerationAnchor() {
     const chat = document.querySelector('#chat');
 
     if (!(chat instanceof HTMLElement)
+        || LONG_CHAT_DOM_RENDER_FORCE_DISABLED
         || !settings.longChatDomRenderOptimizationEnabled
         || isWelcomePageDisplayed(chat)
         || !isLongChatDomRenderGenerationActive()
@@ -1568,6 +1871,7 @@ function settleLongChatDomRenderScrollToBottom(token, reason = '') {
 
     if (!(chat instanceof HTMLElement)
         || token !== state.autoScrollToken
+        || LONG_CHAT_DOM_RENDER_FORCE_DISABLED
         || !settings.longChatDomRenderOptimizationEnabled
         || isWelcomePageDisplayed(chat)
         || state.userScrolledAway) {
@@ -1681,6 +1985,7 @@ function settleLongChatDomRenderScrollToLatestMessageStart(token, reason = '') {
 
     if (!(chat instanceof HTMLElement)
         || token !== state.autoScrollToken
+        || LONG_CHAT_DOM_RENDER_FORCE_DISABLED
         || !settings.longChatDomRenderOptimizationEnabled
         || isWelcomePageDisplayed(chat)
         || state.userScrolledAway) {
@@ -4410,6 +4715,7 @@ export {
     applyChatDeleteEditFlowOptimization,
     applyFastChatListScrollOptimization,
     applyLongChatDomRenderOptimization,
+    applyMessageCompletionScrollToMiddle,
     applyMessageCompletionSound,
     applyMessageTripleClickEdit,
     applyMobileAutoKeyboardSuppression,

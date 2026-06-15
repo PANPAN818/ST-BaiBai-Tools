@@ -22,11 +22,12 @@ import { sendMessageAs } from '../../../slash-commands.js';
 import { isAdmin } from '../../../user.js';
 import { debounce, download, getFileText, regexFromString, resetScrollHeight, setInfoBlock, uuidv4 } from '../../../utils.js';
 import { getCurrentPresetAPI as getRegexCurrentPresetAPI, getCurrentPresetName as getRegexCurrentPresetName, getScriptsByType as getRegexScriptsByType, runRegexScript, SCRIPT_TYPES as REGEX_SCRIPT_TYPES, substitute_find_regex } from '../../regex/engine.js';
-const CURRENT_VERSION = '0.26.5';
+const CURRENT_VERSION = '0.26.6';
 const LOCAL_ASSET_VERSION = getLocalAssetVersion(CURRENT_VERSION);
 const { SaveGenerateDisplay } = await importVersionedLocalModule('./saveGenerateDisplay.js');
 const chatOptimizations = await importVersionedLocalModule('./chatOptimizations.js');
 const presetOptimizations = await importVersionedLocalModule('./presetOptimizations.js');
+const worldInfoPageOptimization = await importVersionedLocalModule('./worldInfoPageOptimization.js');
 
 const LOG_PREFIX = '[柏宝箱]';
 const MODULE_NAME = getModuleName();
@@ -338,6 +339,7 @@ const defaultSettings = {
     customCssInputOptimizationEnabled: true,
     customCssShadowPropertyEnabled: true,
     worldInfoDrawerOptimizationEnabled: true,
+    worldInfoPageOptimizationEnabled: false,
     characterSearchInputOptimizationEnabled: true,
     baibaokuSettingsAccelerationEnabled: true,
     fastCharacterListEnabled: true,
@@ -352,7 +354,8 @@ const defaultSettings = {
     welcomeRecentChatDirectOpenEnabled: true,
     saveRequestGzipEnabled: true,
     translateMessageUpdatedOptimizationEnabled: true,
-    longChatDomRenderOptimizationEnabled: true,
+    longChatDomRenderOptimizationEnabled: false,
+    messageCompletionScrollToMiddleEnabled: true,
     chatListScrollOptimizationEnabled: true,
     chatListAutoClearEnabled: true,
     mobileAutoKeyboardSuppressionEnabled: true,
@@ -402,6 +405,12 @@ presetOptimizations.configurePresetOptimizations({
     logPrefix: LOG_PREFIX,
     loadCodeMirrorModules: loadDescriptionCodeMirrorModules,
     codeMirrorHistoryMaxLength: DESCRIPTION_CODEMIRROR_HISTORY_MAX_LENGTH,
+    saveSettings: saveExtensionSettings,
+});
+worldInfoPageOptimization.configureWorldInfoPageOptimization({
+    settings,
+    extensionState,
+    logPrefix: LOG_PREFIX,
     saveSettings: saveExtensionSettings,
 });
 presetOptimizations.installOpenAITokenizerBulkBridge();
@@ -2729,6 +2738,8 @@ async function renderSettingsPanel() {
             applyWorldInfoCharacterFilterOptionsOptimization();
         });
 
+    worldInfoPageOptimization.bindWorldInfoPageOptimizationSettings({ saveSettings: saveExtensionSettings });
+
     $('#bai_bai_toolkit_character_search_input_optimization_enabled')
         .prop('checked', settings.characterSearchInputOptimizationEnabled)
         .on('input', function () {
@@ -3370,6 +3381,7 @@ function applyFeatureSettings() {
     applyWorldInfoDrawerOptimization();
     applyWorldInfoLazySelect2Optimization();
     applyWorldInfoCharacterFilterOptionsOptimization();
+    worldInfoPageOptimization.applyWorldInfoPageOptimization();
     applyCharacterSearchInputOptimization();
     applyCharacterListAvatarLazyLoadOptimization();
     applyFastChatGetOptimization();
@@ -3389,6 +3401,7 @@ function applyFeatureSettings() {
     chatOptimizations.applyChatDeleteEditFlowOptimization();
     applyTranslateMessageUpdatedOptimization();
     chatOptimizations.applyLongChatDomRenderOptimization();
+    chatOptimizations.applyMessageCompletionScrollToMiddle();
     chatOptimizations.applyMobileAutoKeyboardSuppression();
     chatOptimizations.applyMobileMessageEditScrollGuard();
     chatOptimizations.applyMessageTripleClickEdit();
