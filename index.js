@@ -22,7 +22,7 @@ import { sendMessageAs } from '../../../slash-commands.js';
 import { isAdmin } from '../../../user.js';
 import { debounce, download, getFileText, regexFromString, resetScrollHeight, setInfoBlock, uuidv4 } from '../../../utils.js';
 import { getCurrentPresetAPI as getRegexCurrentPresetAPI, getCurrentPresetName as getRegexCurrentPresetName, getScriptsByType as getRegexScriptsByType, runRegexScript, SCRIPT_TYPES as REGEX_SCRIPT_TYPES, substitute_find_regex } from '../../regex/engine.js';
-const CURRENT_VERSION = '0.26.6';
+const CURRENT_VERSION = '0.26.8';
 const LOCAL_ASSET_VERSION = getLocalAssetVersion(CURRENT_VERSION);
 const { SaveGenerateDisplay } = await importVersionedLocalModule('./saveGenerateDisplay.js');
 const chatOptimizations = await importVersionedLocalModule('./chatOptimizations.js');
@@ -3881,19 +3881,9 @@ function attachCustomCssCodeMirrorEditor(state, source) {
         }, 0);
     };
 
-    const stopPropagationHandler = (event) => {
-        event.stopPropagation();
-    };
-
-    wrapper.addEventListener('mousedown', stopPropagationHandler);
-    wrapper.addEventListener('pointerdown', stopPropagationHandler);
-    wrapper.addEventListener('click', stopPropagationHandler);
     wrapper.addEventListener('focusout', focusOutHandler);
 
     state.listeners.push(
-        { target: wrapper, type: 'mousedown', handler: stopPropagationHandler, options: undefined },
-        { target: wrapper, type: 'pointerdown', handler: stopPropagationHandler, options: undefined },
-        { target: wrapper, type: 'click', handler: stopPropagationHandler, options: undefined },
         { target: wrapper, type: 'focusout', handler: focusOutHandler, options: undefined }
     );
 
@@ -4074,51 +4064,6 @@ function createCustomCssCodeMirrorView(state, source, wrapper, modules) {
                 state.dirty = true;
                 syncCustomCssCodeMirrorToSource(state);
             }
-        }),
-        EditorView.domEventHandlers({
-            beforeinput(event) {
-                event.stopPropagation();
-                return false;
-            },
-            input(event) {
-                event.stopPropagation();
-                return false;
-            },
-            compositionstart(event) {
-                event.stopPropagation();
-                return false;
-            },
-            compositionupdate(event) {
-                event.stopPropagation();
-                return false;
-            },
-            compositionend(event) {
-                event.stopPropagation();
-                return false;
-            },
-            keydown(event) {
-                event.stopPropagation();
-                return false;
-            },
-            keyup(event) {
-                event.stopPropagation();
-                return false;
-            },
-            click(event) {
-                event.stopPropagation();
-                return false;
-            },
-            mousedown(event) {
-                event.stopPropagation();
-                return false;
-            },
-            pointerdown(event) {
-                event.stopPropagation();
-                return false;
-            },
-            scroll() {
-                return false;
-            },
         }),
         EditorView.theme({
             '&': {
@@ -10552,19 +10497,9 @@ function attachDescriptionCodeMirrorEditor(state, source) {
         }, 0);
     };
 
-    const stopPropagationHandler = (event) => {
-        event.stopPropagation();
-    };
-
-    wrapper.addEventListener('mousedown', stopPropagationHandler);
-    wrapper.addEventListener('pointerdown', stopPropagationHandler);
-    wrapper.addEventListener('click', stopPropagationHandler);
     wrapper.addEventListener('focusout', focusOutHandler);
 
     state.listeners.push(
-        { target: wrapper, type: 'mousedown', handler: stopPropagationHandler, options: undefined },
-        { target: wrapper, type: 'pointerdown', handler: stopPropagationHandler, options: undefined },
-        { target: wrapper, type: 'click', handler: stopPropagationHandler, options: undefined },
         { target: wrapper, type: 'focusout', handler: focusOutHandler, options: undefined }
     );
 
@@ -10662,39 +10597,6 @@ function createDescriptionCodeMirrorView(state, source, wrapper, modules) {
             if (update.docChanged) {
                 state.dirty = true;
             }
-        }),
-        EditorView.domEventHandlers({
-            beforeinput(event) {
-                event.stopPropagation();
-                return false;
-            },
-            input(event) {
-                event.stopPropagation();
-                return false;
-            },
-            keydown(event) {
-                event.stopPropagation();
-                return false;
-            },
-            keyup(event) {
-                event.stopPropagation();
-                return false;
-            },
-            click(event) {
-                event.stopPropagation();
-                return false;
-            },
-            mousedown(event) {
-                event.stopPropagation();
-                return false;
-            },
-            pointerdown(event) {
-                event.stopPropagation();
-                return false;
-            },
-            scroll() {
-                return false;
-            },
         }),
         EditorView.theme({
             '&': {

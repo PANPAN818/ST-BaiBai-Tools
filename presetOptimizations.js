@@ -3487,7 +3487,7 @@ function getPresetVuePromptListManagerState() {
             pendingVisibilityTimer: null,
             pendingVisibilityObserver: null,
             groupBodyUnmountTimers: null,
-            globalLibraryCollapsed: false,
+            globalLibraryCollapsed: true,
             globalLibraryItems: [],
             globalLibraryLoaded: false,
             globalLibraryLoading: false,
@@ -12625,19 +12625,9 @@ function attachPresetPromptCodeMirrorEditor(state, source) {
         }, 0);
     };
 
-    const stopPropagationHandler = (event) => {
-        event.stopPropagation();
-    };
-
-    wrapper.addEventListener('mousedown', stopPropagationHandler);
-    wrapper.addEventListener('pointerdown', stopPropagationHandler);
-    wrapper.addEventListener('click', stopPropagationHandler);
     wrapper.addEventListener('focusout', focusOutHandler);
 
     state.listeners.push(
-        { target: wrapper, type: 'mousedown', handler: stopPropagationHandler, options: undefined },
-        { target: wrapper, type: 'pointerdown', handler: stopPropagationHandler, options: undefined },
-        { target: wrapper, type: 'click', handler: stopPropagationHandler, options: undefined },
         { target: wrapper, type: 'focusout', handler: focusOutHandler, options: undefined }
     );
 
@@ -12716,51 +12706,6 @@ function createPresetPromptCodeMirrorView(state, source, wrapper, modules) {
             if (syncPresetPromptCodeMirrorToSource(state) && isPresetPromptCodeMirrorMaximizedSource(state.source)) {
                 dispatchDescriptionEditorSourceInput(state.source);
             }
-        }),
-        EditorView.domEventHandlers({
-            beforeinput(event) {
-                event.stopPropagation();
-                return false;
-            },
-            input(event) {
-                event.stopPropagation();
-                return false;
-            },
-            compositionstart(event) {
-                event.stopPropagation();
-                return false;
-            },
-            compositionupdate(event) {
-                event.stopPropagation();
-                return false;
-            },
-            compositionend(event) {
-                event.stopPropagation();
-                return false;
-            },
-            keydown(event) {
-                event.stopPropagation();
-                return false;
-            },
-            keyup(event) {
-                event.stopPropagation();
-                return false;
-            },
-            click(event) {
-                event.stopPropagation();
-                return false;
-            },
-            mousedown(event) {
-                event.stopPropagation();
-                return false;
-            },
-            pointerdown(event) {
-                event.stopPropagation();
-                return false;
-            },
-            scroll() {
-                return false;
-            },
         }),
         EditorView.theme({
             '&': {
