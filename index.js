@@ -54,6 +54,7 @@ const THEME_MANAGER_BACKGROUND_BINDINGS_KEY = 'themeManager_backgroundBindings';
 const THEME_MANAGER_THEME_ITEM_SELECTOR = `${THEME_MANAGER_PANEL_SELECTOR} .theme-item[data-value]`;
 const THEME_MANAGER_BACKGROUND_SELECTOR = '#bg_menu_content .bg_example, #bg_custom_content .bg_example';
 const BAIBAOKU_SAVE_GENERATE_URL = '/api/plugins/baibaoku/v1/chats/save-generate';
+const BAIBAOKU_SAVE_GENERATE_DISCARD_URL = `${BAIBAOKU_SAVE_GENERATE_URL}/discard`;
 const BAIBAOKU_STATUS_TIMEOUT_MS = 3000;
 const BAIBAOKU_PANEL_STATUS_CACHE_MS = 5 * 60_000;
 const SAVE_GENERATE_FETCH_KEY = '__baiBaiToolkitSaveGenerateFetchPatched';
@@ -11922,6 +11923,7 @@ function installSaveGenerateFetchHook() {
         installSaveGenerateNativeStopHandler(existing);
         installSaveGenerateRecoveryInputBlocker(existing);
         installSaveGenerateResumeHandlers(existing);
+        installSaveGenerateMessageDeleteHandler(existing);
         refreshSaveGenerateRecoveryUiLock(existing);
         queueSaveGenerateResumeCheck(existing, 'existing-hook', 500);
         return existing;
@@ -11960,6 +11962,7 @@ function installSaveGenerateFetchHook() {
         nativeStopHandlerInstalled: false,
         recoveryInputBlockerInstalled: false,
         resumeHandlersInstalled: false,
+        messageDeleteHandlerInstalled: false,
         isEnabled: () => settings.saveGenerateEnabled === true,
     };
 
@@ -12014,6 +12017,7 @@ function installSaveGenerateFetchHook() {
     installSaveGenerateNativeStopHandler(state);
     installSaveGenerateRecoveryInputBlocker(state);
     installSaveGenerateResumeHandlers(state);
+    installSaveGenerateMessageDeleteHandler(state);
     queueSaveGenerateResumeCheck(state, 'install', 500);
     console.debug(`${LOG_PREFIX} save-generate fetch hook installed`);
     return state;
@@ -13098,6 +13102,63 @@ function installSaveGenerateResumeHandlers(state) {
     window.addEventListener('pageshow', () => queue('pageshow'));
 }
 
+function installSaveGenerateMessageDeleteHandler(state) {
+    if (!state || state.messageDeleteHandlerInstalled || typeof eventSource?.on !== 'function') {
+        return;
+    }
+
+    state.messageDeleteHandlerInstalled = true;
+    eventSource.on(event_types.MESSAGE_DELETED, () => {
+        void discardCurrentChatSaveGenerateJobsAfterMessageDelete(state);
+    });
+}
+
+async function discardCurrentChatSaveGenerateJobsAfterMessageDelete(state) {
+    if (!state?.originalFetch || selected_group) {
+        return;
+    }
+
+    const chatId = getCurrentSaveGenerateChatId();
+    if (!chatId) {
+        return;
+    }
+
+    try {
+        const result = await discardSaveGenerateJobsForChat(state.originalFetch, chatId);
+        markSaveGenerateLocalChatJobsConsumed(state, chatId);
+        clearActiveSaveGenerateCancelTarget(state, { chatId });
+        clearSaveGenerateRecoveryLock(state, chatId);
+        state.lastResumeCheckChatId = chatId;
+        state.lastResumeCheckAt = Date.now();
+        console.debug(`${LOG_PREFIX} save-generate discarded jobs after message delete`, result);
+    } catch (error) {
+        console.debug(`${LOG_PREFIX} save-generate discard after message delete failed`, error);
+    }
+}
+
+async function discardSaveGenerateJobsForChat(fetchFn, chatId) {
+    const normalizedChatId = String(chatId || '').trim();
+    if (!normalizedChatId) {
+        return null;
+    }
+
+    const headers = new Headers(getRequestHeaders());
+    headers.set('Content-Type', 'application/json');
+    const response = await fetchFn(BAIBAOKU_SAVE_GENERATE_DISCARD_URL, {
+        method: 'POST',
+        headers,
+        cache: 'no-store',
+        body: JSON.stringify({ chatId: normalizedChatId }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || payload?.ok !== true) {
+        const error = new Error(payload?.message || payload?.error?.message || `HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
+    }
+    return payload.data || null;
+}
+
 function queueSaveGenerateResumeCheck(state, reason = 'unknown', delayMs = SAVE_GENERATE_RESUME_CHECK_DELAY_MS) {
     if (!state) {
         return;
@@ -13482,6 +13543,24 @@ function markSaveGenerateLocalJobConsumed(state, jobId) {
     for (const record of state.pendingJobs) {
         if (String(record?.id || '') === String(jobId)) {
             record.consumed = true;
+        }
+    }
+    cleanupSaveGenerateRecords(state);
+}
+
+function markSaveGenerateLocalChatJobsConsumed(state, chatId) {
+    const normalizedChatId = String(chatId || '').trim();
+    if (!normalizedChatId || !Array.isArray(state?.pendingJobs)) {
+        return;
+    }
+
+    for (const record of state.pendingJobs) {
+        const recordChatId = String(record?.save?.chatId || record?.chatId || '').trim();
+        if (recordChatId === normalizedChatId) {
+            record.consumed = true;
+            if (record.id) {
+                markSaveGenerateJobSeen(record);
+            }
         }
     }
     cleanupSaveGenerateRecords(state);
