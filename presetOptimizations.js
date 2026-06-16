@@ -1,4 +1,4 @@
-import { event_types, eventSource, getRequestHeaders, saveSettings } from '../../../../script.js';
+import { event_types, eventSource, getCurrentChatId, getRequestHeaders, isGenerating, saveSettings } from '../../../../script.js';
 import { oai_settings, openai_setting_names, openai_settings, promptManager, settingsToUpdate } from '../../../openai.js';
 import { getPresetManager } from '../../../preset-manager.js';
 import { getTokenizerModel } from '../../../tokenizers.js';
@@ -23,6 +23,7 @@ const PRESET_SWITCH_BEFORE_HANDLER_KEY = '__baiBaiToolkitPresetSwitchBeforeHandl
 const PRESET_SWITCH_HANDLER_KEY = '__baiBaiToolkitPresetSwitchHandler';
 const PRESET_MODEL_CHANGE_HANDLER_KEY = '__baiBaiToolkitPresetModelChangeHandler';
 const PRESET_CHAT_LOADED_HANDLER_KEY = '__baiBaiToolkitPresetChatLoadedHandler';
+const PRESET_CONTEXT_TOKEN_REFRESH_KEY = '__baiBaiToolkitPresetContextTokenRefresh';
 const PRESET_GROUP_PRESET_DELETED_HANDLER_KEY = '__baiBaiToolkitPresetGroupPresetDeletedHandler';
 const PRESET_GROUP_PRESET_IMPORT_HANDLER_KEY = '__baiBaiToolkitPresetGroupPresetImportHandler';
 const PRESET_GROUP_PRESET_RENAMED_HANDLER_KEY = '__baiBaiToolkitPresetGroupPresetRenamedHandler';
@@ -104,6 +105,7 @@ const PRESET_DRAG_INTERACTIVE_SELECTOR = '.prompt_manager_prompt_controls, .bai-
 const BAIBAOKU_TOKENIZER_BULK_COUNT_URL = '/api/plugins/baibaoku/v1/tokenizers/bulk-count';
 const OPENAI_TOKENIZER_BULK_BRIDGE_KEY = '__baibaokuTokenizerBulkBridge';
 const OPENAI_TOKENIZER_BULK_CACHE_LIMIT = 5000;
+const OPENAI_TOKENIZER_BULK_AJAX_BATCH_DELAY_MS = 8;
 const PRESET_SAVE_URL = '/api/presets/save';
 const PRESET_BACKUP_SAVE_URL = '/api/plugins/baibaoku/v1/preset-backups/save';
 const PRESET_BACKUP_PREVIEW_LIST_URL = '/api/plugins/baibaoku/v1/preset-backups/save/list';
@@ -111,6 +113,10 @@ const PRESET_BACKUP_PREVIEW_RENAME_URL = '/api/plugins/baibaoku/v1/preset-backup
 const PRESET_BACKUP_PREVIEW_DELETE_URL = '/api/plugins/baibaoku/v1/preset-backups/save/delete';
 const PRESET_BACKUP_PREVIEW_DOWNLOAD_URL = '/api/plugins/baibaoku/v1/preset-backups/download';
 const PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS = 2000;
+const PRESET_CONTEXT_TOKEN_REFRESH_DELAY_MS = 80;
+const PRESET_CONTEXT_TOKEN_REFRESH_RETRY_MS = 250;
+const PRESET_CONTEXT_TOKEN_REFRESH_MAX_ATTEMPTS = 8;
+const PRESET_CONTEXT_TOKEN_REFRESH_SELF_SUPPRESS_MS = 750;
 const PRESET_DRAG_READY_CLASS = 'bai-bai-toolkit-preset-drag-ready';
 const PRESET_DRAG_ACTIVE_CLASS = 'bai-bai-toolkit-preset-drag-active';
 const PRESET_DRAG_SOURCE_CLASS = 'bai-bai-toolkit-preset-drag-source';
@@ -10171,17 +10177,131 @@ function applyPresetChatLoadedTokenRefreshOptimization() {
         return;
     }
 
-    const handler = () => {
-        void handleChatLoadedForPromptManager();
+    const registrations = [];
+    const register = (eventType, reason, {
+        suppressMs = 0,
+        delayMs = PRESET_CONTEXT_TOKEN_REFRESH_DELAY_MS,
+        allowNoContext = false,
+    } = {}) => {
+        if (!eventType || typeof eventSource?.on !== 'function') {
+            return;
+        }
+
+        const handler = () => {
+            schedulePromptManagerContextTokenRefresh(reason, { suppressMs, delayMs, allowNoContext });
+        };
+
+        registrations.push({ eventType, handler });
+
+        if (typeof eventSource.makeFirst === 'function') {
+            eventSource.makeFirst(eventType, handler);
+        } else {
+            eventSource.on(eventType, handler);
+        }
     };
 
-    extensionState[PRESET_CHAT_LOADED_HANDLER_KEY] = handler;
+    register(event_types.CHAT_LOADED, 'chat load', { suppressMs: PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS, delayMs: 0 });
+    register(event_types.CHAT_CHANGED, 'chat changed', { suppressMs: PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS, allowNoContext: true });
+    register('groupSelected', 'group selected', { suppressMs: PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS, allowNoContext: true });
+    register(event_types.CHARACTER_EDITED, 'character edited', { suppressMs: PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS });
+    register(event_types.CHARACTER_DELETED, 'character deleted', { suppressMs: PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS });
+    register(event_types.MESSAGE_SENT, 'message sent');
+    register(event_types.MESSAGE_RECEIVED, 'message received', { suppressMs: PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS });
+    register(event_types.MESSAGE_EDITED, 'message edited', { suppressMs: PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS });
+    register(event_types.MESSAGE_UPDATED, 'message updated');
+    register(event_types.MESSAGE_DELETED, 'message deleted', { suppressMs: PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS });
+    register(event_types.MESSAGE_SWIPED, 'message swiped');
+    register(event_types.MESSAGE_SWIPE_DELETED, 'message swipe deleted');
+    register(event_types.GENERATION_ENDED, 'generation ended');
+    register(event_types.WORLDINFO_SETTINGS_UPDATED, 'world info settings updated', { suppressMs: PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS });
+    register(event_types.WORLDINFO_UPDATED, 'world info updated');
+    register(event_types.WORLDINFO_FORCE_ACTIVATE, 'world info force activate');
+    register(event_types.WORLDINFO_SCAN_DONE, 'world info scan done');
+    register(event_types.PERSONA_CHANGED, 'persona changed');
+    register(event_types.PERSONA_CREATED, 'persona created');
+    register(event_types.PERSONA_UPDATED, 'persona updated');
+    register(event_types.PERSONA_RENAMED, 'persona renamed');
+    register(event_types.PERSONA_DELETED, 'persona deleted');
+    register(event_types.CHATCOMPLETION_SOURCE_CHANGED, 'chat completion source changed', { suppressMs: PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS });
+    register(event_types.SETTINGS_UPDATED, 'settings updated', { delayMs: 250 });
 
-    if (typeof eventSource.makeFirst === 'function') {
-        eventSource.makeFirst(event_types.CHAT_LOADED, handler);
-    } else {
-        eventSource.on(event_types.CHAT_LOADED, handler);
+    const tokenSettingsHandler = event => {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target?.matches?.('#openai_max_context, #openai_max_tokens')) {
+            return;
+        }
+
+        schedulePromptManagerContextTokenRefresh('token budget changed', {
+            suppressMs: PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS,
+            delayMs: PRESET_CONTEXT_TOKEN_REFRESH_DELAY_MS,
+        });
+    };
+
+    document.addEventListener('change', tokenSettingsHandler, true);
+
+    extensionState[PRESET_CHAT_LOADED_HANDLER_KEY] = {
+        registrations,
+        tokenSettingsHandler,
+    };
+
+    schedulePromptManagerContextTokenRefresh('initial prompt manager token refresh', {
+        delayMs: 250,
+        allowNoContext: true,
+    });
+}
+
+function schedulePromptManagerContextTokenRefresh(reason, {
+    suppressMs = 0,
+    delayMs = PRESET_CONTEXT_TOKEN_REFRESH_DELAY_MS,
+    allowNoContext = false,
+} = {}) {
+    if (!settings.presetSwitchOptimizationEnabled) {
+        return;
     }
+
+    const state = getPresetContextTokenRefreshState();
+    const now = Date.now();
+    if (state.inFlight || now < Number(state.suppressUntil || 0)) {
+        return;
+    }
+
+    const hasContext = hasPromptManagerTokenContext();
+    if (!hasContext && !allowNoContext) {
+        return;
+    }
+
+    if (suppressMs > 0) {
+        suppressPromptManagerDebouncedRender(suppressMs);
+    }
+
+    state.reason = reason || 'context change';
+    state.attempt = 0;
+    state.allowNoContext = Boolean(allowNoContext);
+
+    clearTimeout(state.timer);
+    state.timer = setTimeout(() => {
+        state.timer = null;
+        void runPromptManagerContextTokenRefresh(state.reason, state.attempt, state.allowNoContext);
+    }, Math.max(0, Number(delayMs) || 0));
+}
+
+function hasPromptManagerTokenContext() {
+    return Boolean(getCurrentChatId?.());
+}
+
+function getPresetContextTokenRefreshState() {
+    if (!extensionState[PRESET_CONTEXT_TOKEN_REFRESH_KEY] || typeof extensionState[PRESET_CONTEXT_TOKEN_REFRESH_KEY] !== 'object') {
+        extensionState[PRESET_CONTEXT_TOKEN_REFRESH_KEY] = {
+            timer: null,
+            reason: '',
+            attempt: 0,
+            allowNoContext: false,
+            inFlight: false,
+            suppressUntil: 0,
+        };
+    }
+
+    return extensionState[PRESET_CONTEXT_TOKEN_REFRESH_KEY];
 }
 
 async function handleChatCompletionModelChangedForPromptManager() {
@@ -10192,36 +10312,166 @@ async function handleChatCompletionModelChangedForPromptManager() {
     try {
         suppressPromptManagerDebouncedRender();
         await renderPromptManagerListWithoutTokenStats();
-        markPromptManagerTokensPending();
         refreshPromptManagerTokensAfterPresetSwitchDebounced();
     } catch (error) {
         console.debug(`${LOG_PREFIX} Failed to fast-refresh prompt manager after model change`, error);
     }
 }
 
-async function handleChatLoadedForPromptManager() {
-    if (!settings.presetSwitchOptimizationEnabled || !isPromptManagerReadyForFastPresetSwitch()) {
+async function runPromptManagerContextTokenRefresh(reason, attempt = 0, allowNoContext = false) {
+    if (!settings.presetSwitchOptimizationEnabled) {
         return;
     }
 
     try {
-        suppressPromptManagerDebouncedRender(PRESET_CHAT_LOAD_RENDER_SUPPRESS_MS);
-        setTimeout(() => {
-            void fastRefreshPromptManagerTokensAfterContextChange('chat load');
-        }, 0);
+        if (typeof isGenerating === 'function' && isGenerating()) {
+            return;
+        }
+
+        if (!isPromptManagerReadyForFastPresetSwitch()) {
+            if (attempt >= PRESET_CONTEXT_TOKEN_REFRESH_MAX_ATTEMPTS) {
+                return;
+            }
+
+            const state = getPresetContextTokenRefreshState();
+            state.reason = reason || state.reason || 'context change';
+            state.attempt = attempt + 1;
+            state.allowNoContext = Boolean(allowNoContext);
+            clearTimeout(state.timer);
+            state.timer = setTimeout(() => {
+                state.timer = null;
+                void runPromptManagerContextTokenRefresh(state.reason, state.attempt, state.allowNoContext);
+            }, PRESET_CONTEXT_TOKEN_REFRESH_RETRY_MS);
+            return;
+        }
+
+        if (!hasPromptManagerTokenContext()) {
+            if (allowNoContext) {
+                await refreshPromptManagerTokensForMissingContext();
+            }
+            return;
+        }
+
+        await fastRefreshPromptManagerTokensAfterContextChange(reason || 'context change', { markPending: false });
     } catch (error) {
-        console.debug(`${LOG_PREFIX} Failed to schedule fast prompt manager refresh after chat load`, error);
+        console.debug(`${LOG_PREFIX} Failed to fast-refresh prompt manager after ${reason}`, error);
     }
 }
 
-async function fastRefreshPromptManagerTokensAfterContextChange(reason) {
+async function refreshPromptManagerTokensForMissingContext() {
+    const contextRefreshState = getPresetContextTokenRefreshState();
+    contextRefreshState.inFlight = true;
+
+    try {
+        await refreshPromptManagerStaticTokensWithoutChatContext();
+        await renderPromptManagerListWithoutTokenStats();
+        if (isPresetVuePromptListManagerActive()) {
+            syncPresetVuePromptListManagerState();
+        }
+        updatePromptManagerTokenDisplay();
+    } catch (error) {
+        console.debug(`${LOG_PREFIX} Failed to refresh prompt manager after leaving chat`, error);
+    } finally {
+        contextRefreshState.inFlight = false;
+        contextRefreshState.suppressUntil = Date.now() + PRESET_CONTEXT_TOKEN_REFRESH_SELF_SUPPRESS_MS;
+    }
+}
+
+async function refreshPromptManagerStaticTokensWithoutChatContext() {
+    if (!promptManager?.tokenHandler || typeof promptManager.getPromptCollection !== 'function') {
+        return false;
+    }
+
+    const tokenHandler = promptManager.tokenHandler;
+    if (typeof tokenHandler.resetCounts !== 'function' || typeof tokenHandler.getCounts !== 'function') {
+        return false;
+    }
+
+    tokenHandler.resetCounts();
+    const counts = tokenHandler.getCounts();
+
+    for (const prompt of promptManager.serviceSettings?.prompts || []) {
+        if (prompt?.identifier) {
+            counts[prompt.identifier] = 0;
+        }
+    }
+
+    const promptCollection = promptManager.getPromptCollection('normal');
+    const prompts = Array.isArray(promptCollection?.collection) ? promptCollection.collection : [];
+    const entries = prompts
+        .filter(prompt => prompt?.identifier && typeof prompt.content === 'string' && prompt.content.length > 0)
+        .map(prompt => ({
+            identifier: prompt.identifier,
+            message: {
+                role: prompt.role || 'system',
+                content: prompt.content,
+            },
+        }));
+
+    if (entries.length > 0) {
+        const model = getTokenizerModel();
+        const rawCounts = await getOpenAITokenizerBulkCountsUsingCache(model, entries);
+        rawCounts.forEach((count, index) => {
+            counts[entries[index].identifier] = normalizeOpenAITokenizerPromptManagerCount(count, model);
+        });
+    }
+
+    promptManager.tokenUsage = typeof tokenHandler.getTotal === 'function' ? tokenHandler.getTotal() : 0;
+    return true;
+}
+
+async function getOpenAITokenizerBulkCountsUsingCache(model, entries) {
+    const results = new Array(entries.length);
+    const misses = [];
+
+    for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index];
+        const key = getOpenAITokenizerCacheKey(model, entry.message);
+        const cached = getOpenAITokenizerBulkState().cache.get(key);
+
+        if (typeof cached === 'number') {
+            results[index] = cached;
+            continue;
+        }
+
+        misses.push({
+            index,
+            key,
+            message: entry.message,
+        });
+    }
+
+    if (misses.length > 0) {
+        const counts = await fetchOpenAITokenizerBulkCounts(model, misses);
+        counts.forEach((count, missIndex) => {
+            const miss = misses[missIndex];
+            setOpenAITokenizerBulkCache(miss.key, count);
+            results[miss.index] = count;
+        });
+    }
+
+    return results.map(count => Number(count) || 0);
+}
+
+function normalizeOpenAITokenizerPromptManagerCount(rawCount, model) {
+    const count = Number(rawCount);
+    if (!Number.isFinite(count)) {
+        return 0;
+    }
+
+    return Math.max(0, count - (model === 'claude' ? 1 : 3));
+}
+
+async function fastRefreshPromptManagerTokensAfterContextChange(reason, { markPending = true } = {}) {
     try {
         if (!isPromptManagerReadyForFastPresetSwitch()) {
             return;
         }
 
         await renderPromptManagerListWithoutTokenStats();
-        markPromptManagerTokensPending();
+        if (markPending) {
+            markPromptManagerTokensPending();
+        }
         refreshPromptManagerTokensAfterPresetSwitchDebounced();
     } catch (error) {
         console.debug(`${LOG_PREFIX} Failed to fast-refresh prompt manager after ${reason}`, error);
@@ -11754,24 +12004,29 @@ async function refreshPromptManagerTokens() {
         return;
     }
 
-    let refreshedWithBulkCount = false;
+    if (typeof isGenerating === 'function' && isGenerating()) {
+        return;
+    }
 
-    if (settings.tokenizerBulkCountEnabled !== false) {
-        try {
-            refreshedWithBulkCount = await refreshPromptManagerTokensWithBaibaokuBulkCount();
-        } catch (error) {
-            console.debug(`${LOG_PREFIX} Failed to refresh prompt manager token counts with BaiBaoKu bulk count`, error);
-        }
+    if (!hasPromptManagerTokenContext()) {
+        await refreshPromptManagerTokensForMissingContext();
+        return;
     }
 
     try {
-        if (!refreshedWithBulkCount) {
-            await promptManager.tryGenerate();
+        const contextRefreshState = getPresetContextTokenRefreshState();
+        contextRefreshState.inFlight = true;
+        await promptManager.tryGenerate();
+        if (isPresetVuePromptListManagerActive()) {
+            syncPresetVuePromptListManagerState();
         }
-
         updatePromptManagerTokenDisplay();
     } catch (error) {
         console.debug(`${LOG_PREFIX} Failed to refresh prompt manager token counts`, error);
+    } finally {
+        const contextRefreshState = getPresetContextTokenRefreshState();
+        contextRefreshState.inFlight = false;
+        contextRefreshState.suppressUntil = Date.now() + PRESET_CONTEXT_TOKEN_REFRESH_SELF_SUPPRESS_MS;
     }
 }
 
@@ -11799,89 +12054,6 @@ function handlePresetVuePromptRangeSelectionDelegatedClick(event, target) {
     return true;
 }
 
-async function refreshPromptManagerTokensWithBaibaokuBulkCount() {
-    if (!promptManager?.tokenHandler || typeof promptManager.getPromptCollection !== 'function') {
-        return false;
-    }
-
-    const tokenHandler = promptManager.tokenHandler;
-    if (typeof tokenHandler.resetCounts !== 'function' || typeof tokenHandler.getCounts !== 'function') {
-        return false;
-    }
-
-    const promptCollection = promptManager.getPromptCollection('normal');
-    const prompts = Array.isArray(promptCollection?.collection) ? promptCollection.collection : [];
-    const entries = prompts
-        .filter(prompt => prompt?.identifier && typeof prompt.content === 'string' && prompt.content.length > 0)
-        .map(prompt => ({
-            identifier: prompt.identifier,
-            message: {
-                role: prompt.role || 'system',
-                content: prompt.content,
-            },
-        }));
-
-    if (entries.length === 0) {
-        applyPromptManagerTokenCounts([]);
-        return true;
-    }
-
-    const model = getTokenizerModel();
-    const headers = new Headers(getRequestHeaders());
-    headers.set('content-type', 'application/json');
-
-    const response = await fetch(BAIBAOKU_TOKENIZER_BULK_COUNT_URL, {
-        method: 'POST',
-        headers,
-        cache: 'no-store',
-        body: JSON.stringify({
-            model,
-            messages: entries.map(entry => entry.message),
-        }),
-    });
-    const payload = await response.json().catch(() => null);
-    const rawCounts = payload?.data?.counts;
-
-    if (!response.ok || payload?.ok !== true || !Array.isArray(rawCounts) || rawCounts.length !== entries.length) {
-        throw new Error(payload?.error?.message || `BaiBaoKu bulk count failed: HTTP ${response.status}`);
-    }
-
-    applyPromptManagerTokenCounts(entries.map((entry, index) => ({
-        identifier: entry.identifier,
-        tokens: normalizeBulkSingleMessageCount(rawCounts[index], model),
-    })));
-
-    return true;
-}
-
-function applyPromptManagerTokenCounts(entries) {
-    const tokenHandler = promptManager.tokenHandler;
-    tokenHandler.resetCounts();
-
-    const counts = tokenHandler.getCounts();
-    for (const prompt of promptManager.serviceSettings?.prompts || []) {
-        if (prompt?.identifier) {
-            counts[prompt.identifier] = 0;
-        }
-    }
-
-    for (const entry of entries) {
-        counts[entry.identifier] = entry.tokens;
-    }
-
-    promptManager.tokenUsage = typeof tokenHandler.getTotal === 'function' ? tokenHandler.getTotal() : 0;
-}
-
-function normalizeBulkSingleMessageCount(rawCount, model) {
-    const count = Number(rawCount);
-    if (!Number.isFinite(count)) {
-        return 0;
-    }
-
-    const adjustment = model === 'claude' ? 1 : 3;
-    return Math.max(0, count - adjustment);
-}
-
 function getOpenAITokenizerBulkState() {
     if (!extensionState.openAITokenizerBulkBridge || typeof extensionState.openAITokenizerBulkBridge !== 'object') {
         extensionState.openAITokenizerBulkBridge = {};
@@ -11897,11 +12069,18 @@ function getOpenAITokenizerBulkState() {
             prepareMessages: 0,
             prepareEmpty: 0,
             prepareErrors: 0,
+            ajaxBatches: 0,
+            ajaxBatchMessages: 0,
             ajaxHits: 0,
             ajaxMisses: 0,
             ajaxFallbacks: 0,
             ajaxErrors: 0,
         };
+    }
+    for (const key of ['prepareCalls', 'prepareMessages', 'prepareEmpty', 'prepareErrors', 'ajaxBatches', 'ajaxBatchMessages', 'ajaxHits', 'ajaxMisses', 'ajaxFallbacks', 'ajaxErrors']) {
+        if (typeof state.stats[key] !== 'number') {
+            state.stats[key] = 0;
+        }
     }
 
     return state;
@@ -12011,8 +12190,7 @@ function getOpenAITokenizerBulkAjaxHit(options) {
     }
 
     if (!state.pending) {
-        state.stats.ajaxMisses += 1;
-        return null;
+        return enqueueOpenAITokenizerBulkAjaxCount(model, message, key);
     }
 
     return Promise.resolve(state.pending).then(() => {
@@ -12021,9 +12199,97 @@ function getOpenAITokenizerBulkAjaxHit(options) {
             return { count: next };
         }
 
-        state.stats.ajaxMisses += 1;
-        return null;
+        return enqueueOpenAITokenizerBulkAjaxCount(model, message, key);
     });
+}
+
+function enqueueOpenAITokenizerBulkAjaxCount(model, message, key) {
+    const state = getOpenAITokenizerBulkState();
+
+    if (!state.ajaxBatch || typeof state.ajaxBatch !== 'object') {
+        state.ajaxBatch = {
+            entries: [],
+            byKey: new Map(),
+            timer: null,
+        };
+    }
+    if (!(state.ajaxBatch.byKey instanceof Map)) {
+        state.ajaxBatch.byKey = new Map();
+    }
+    if (!Array.isArray(state.ajaxBatch.entries)) {
+        state.ajaxBatch.entries = [];
+    }
+
+    const existing = state.ajaxBatch.byKey.get(key);
+    if (existing?.promise) {
+        return existing.promise;
+    }
+
+    let resolveEntry;
+    let rejectEntry;
+    const promise = new Promise((resolve, reject) => {
+        resolveEntry = resolve;
+        rejectEntry = reject;
+    });
+    const entry = {
+        model,
+        message,
+        key,
+        promise,
+        resolve: resolveEntry,
+        reject: rejectEntry,
+    };
+
+    state.ajaxBatch.entries.push(entry);
+    state.ajaxBatch.byKey.set(key, entry);
+
+    if (!state.ajaxBatch.timer) {
+        state.ajaxBatch.timer = setTimeout(flushOpenAITokenizerBulkAjaxBatch, OPENAI_TOKENIZER_BULK_AJAX_BATCH_DELAY_MS);
+    }
+
+    return promise;
+}
+
+function flushOpenAITokenizerBulkAjaxBatch() {
+    const state = getOpenAITokenizerBulkState();
+    const batch = state.ajaxBatch;
+
+    if (!batch || !Array.isArray(batch.entries) || batch.entries.length === 0) {
+        if (batch) {
+            batch.timer = null;
+        }
+        return;
+    }
+
+    const entries = batch.entries.splice(0, batch.entries.length);
+    batch.byKey?.clear?.();
+    batch.timer = null;
+
+    const entriesByModel = new Map();
+    for (const entry of entries) {
+        const group = entriesByModel.get(entry.model) ?? [];
+        group.push(entry);
+        entriesByModel.set(entry.model, group);
+    }
+
+    for (const [model, group] of entriesByModel.entries()) {
+        state.stats.ajaxBatches += 1;
+        state.stats.ajaxBatchMessages += group.length;
+        void fetchOpenAITokenizerBulkCounts(model, group)
+            .then(counts => {
+                counts.forEach((count, index) => {
+                    const entry = group[index];
+                    setOpenAITokenizerBulkCache(entry.key, count);
+                    entry.resolve({ count });
+                });
+            })
+            .catch(error => {
+                state.stats.ajaxMisses += group.length;
+                for (const entry of group) {
+                    entry.reject(error);
+                }
+            });
+    }
 }
 
 function getOpenAITokenizerAjaxMessage(options) {
