@@ -1900,6 +1900,10 @@ function installWorldInfoMobileHeaderLayoutStyle() {
     const style = document.createElement('style');
     style.id = WORLD_INFO_MOBILE_HEADER_LAYOUT_STYLE_ID;
     style.textContent = `
+#world_popup {
+    overflow-x: hidden;
+}
+
 @media (max-width: 600px) {
     #world_popup[data-bai-bai-world-info-popup-layout="true"] > .bai-bai-wi-popup-header {
         display: flex;
