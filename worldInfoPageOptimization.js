@@ -259,6 +259,11 @@ const WORLD_INFO_EDITOR_SELECT_SEARCH_MOBILE_SUPPRESSED_DATASET_KEY = 'baiBaiToo
 const WORLD_INFO_EDITOR_SELECT_SEARCH_MOBILE_RESTORE_MS = 450;
 const WORLD_INFO_EDITOR_SELECT_STYLE_KEY = '__baiBaiToolkitWorldInfoEditorSelectStyle';
 const WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS = 'bai-bai-wi-editor-select-dropdown';
+const WORLD_INFO_GLOBAL_SELECTOR_STATE_KEY = '__baiBaiToolkitWorldInfoGlobalSelectorState';
+const WORLD_INFO_GLOBAL_SELECTOR_DATASET_KEY = 'baiBaiToolkitWorldInfoGlobalSelector';
+const WORLD_INFO_GLOBAL_SELECTOR_OPTION_ORDER_DATASET_KEY = 'baiBaiToolkitWorldInfoGlobalSelectorOrder';
+const WORLD_INFO_GLOBAL_SELECTOR_DROPDOWN_CLASS = 'bai-bai-wi-global-selector-dropdown';
+const WORLD_INFO_GLOBAL_SELECTOR_HOST_CLASS = 'bai-bai-wi-global-selector';
 const WORLD_INFO_ENTRY_DRAWER_TOGGLE_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer > .inline-drawer-header .inline-drawer-toggle';
 const WORLD_INFO_ENTRY_DRAWER_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer';
 const WORLD_INFO_LAZY_SELECT2_SELECTOR = '#world_popup_entries_list .world_entry_edit select[name="characterFilter"], #world_popup_entries_list .world_entry_edit select[name="triggers"]';
@@ -335,6 +340,7 @@ export function applyWorldInfoListOptimization() {
         installWorldInfoVueListPaginationPatch(state);
         installWorldInfoEditorSelectGrouping(state);
         installWorldInfoEditorSelectSearch(state);
+        installWorldInfoGlobalSelectorOptimization(state);
         installWorldInfoMobileHeaderLayoutStyle();
         installWorldInfoMobileHeaderLayoutWatcher(state);
         installWorldInfoMobileLayoutMutationObserver(state);
@@ -343,6 +349,7 @@ export function applyWorldInfoListOptimization() {
         restoreWorldInfoVueListPaginationPatch(state);
         removeWorldInfoEditorSelectGrouping(state);
         removeWorldInfoEditorSelectSearch(state);
+        removeWorldInfoGlobalSelectorOptimization(state);
         removeWorldInfoMobileLayoutMutationObserver(state);
         removeWorldInfoMobileHeaderLayoutWatcher(state);
         restoreWorldInfoPopupLayout();
@@ -376,7 +383,25 @@ function getWorldInfoVueListOptimizationState() {
             worldInfoEditorSelectSearchOpenHandler: null,
             worldInfoEditorSelectSearchInteractionGuard: null,
             worldInfoEditorSelectGroupingApplying: false,
+            worldInfoGlobalSelectorMutationObserver: null,
+            worldInfoGlobalSelectorDropdown: null,
+            worldInfoGlobalSelectorTriggerHandler: null,
+            worldInfoGlobalSelectorTriggerEvents: null,
+            worldInfoGlobalSelectorRefreshQueued: false,
+            worldInfoGlobalSelectorSelects: new Set(),
         };
+    }
+
+    const state = extensionState[WORLD_INFO_VUE_LIST_OPTIMIZATION_KEY];
+
+    state.worldInfoGlobalSelectorMutationObserver ??= null;
+    state.worldInfoGlobalSelectorDropdown ??= null;
+    state.worldInfoGlobalSelectorTriggerHandler ??= null;
+    state.worldInfoGlobalSelectorTriggerEvents ??= null;
+    state.worldInfoGlobalSelectorRefreshQueued ??= false;
+
+    if (!(state.worldInfoGlobalSelectorSelects instanceof Set)) {
+        state.worldInfoGlobalSelectorSelects = new Set();
     }
 
     return extensionState[WORLD_INFO_VUE_LIST_OPTIMIZATION_KEY];
@@ -576,6 +601,691 @@ function removeWorldInfoEditorSelectSearch(state = getWorldInfoVueListOptimizati
     delete select.dataset[WORLD_INFO_EDITOR_SELECT_SEARCH_DATASET_KEY];
 }
 
+function installWorldInfoGlobalSelectorOptimization(state = getWorldInfoVueListOptimizationState()) {
+    refreshWorldInfoGlobalSelectorOptimization(state);
+    installWorldInfoGlobalSelectorTriggerHandler(state);
+
+    if (state.worldInfoGlobalSelectorMutationObserver || !document?.body || typeof MutationObserver !== 'function') {
+        return;
+    }
+
+    const observer = new MutationObserver(() => {
+        scheduleWorldInfoGlobalSelectorRefresh(state);
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+    state.worldInfoGlobalSelectorMutationObserver = observer;
+}
+
+function removeWorldInfoGlobalSelectorOptimization(state = getWorldInfoVueListOptimizationState()) {
+    state.worldInfoGlobalSelectorMutationObserver?.disconnect();
+    state.worldInfoGlobalSelectorMutationObserver = null;
+    state.worldInfoGlobalSelectorRefreshQueued = false;
+    removeWorldInfoGlobalSelectorTriggerHandler(state);
+
+    for (const select of Array.from(state.worldInfoGlobalSelectorSelects ?? [])) {
+        restoreWorldInfoGlobalSelector(select, state);
+    }
+
+    state.worldInfoGlobalSelectorSelects?.clear?.();
+}
+
+function installWorldInfoGlobalSelectorTriggerHandler(state = getWorldInfoVueListOptimizationState()) {
+    removeWorldInfoGlobalSelectorTriggerHandler(state);
+
+    if (!document?.body) {
+        return;
+    }
+
+    const handler = (event) => {
+        const displayEl = event.target instanceof Element
+            ? event.target.closest(`.${WORLD_INFO_GLOBAL_SELECTOR_HOST_CLASS}.bai-bai-wi-global-selector-display`)
+            : null;
+
+        if (!(displayEl instanceof HTMLElement)
+            || (event.target instanceof Element && event.target.closest('.bai-bai-wi-global-selector-chip-remove'))) {
+            return;
+        }
+
+        const select = getWorldInfoGlobalSelectorSelectByDisplay(displayEl, state);
+
+        if (!(select instanceof HTMLSelectElement)) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        toggleWorldInfoGlobalSelectorDropdown(select, state);
+    };
+
+    const triggerEvents = typeof PointerEvent === 'function'
+        ? ['pointerdown']
+        : ['mousedown', 'touchend'];
+
+    triggerEvents.forEach(eventName => document.addEventListener(eventName, handler, true));
+    state.worldInfoGlobalSelectorTriggerHandler = handler;
+    state.worldInfoGlobalSelectorTriggerEvents = triggerEvents;
+}
+
+function removeWorldInfoGlobalSelectorTriggerHandler(state = getWorldInfoVueListOptimizationState()) {
+    const handler = state.worldInfoGlobalSelectorTriggerHandler;
+
+    if (!handler) {
+        return;
+    }
+
+    (state.worldInfoGlobalSelectorTriggerEvents ?? ['pointerdown', 'mousedown', 'touchend'])
+        .forEach(eventName => document.removeEventListener(eventName, handler, true));
+    state.worldInfoGlobalSelectorTriggerHandler = null;
+    state.worldInfoGlobalSelectorTriggerEvents = null;
+}
+
+function scheduleWorldInfoGlobalSelectorRefresh(state = getWorldInfoVueListOptimizationState()) {
+    if (state.worldInfoGlobalSelectorRefreshQueued) {
+        return;
+    }
+
+    state.worldInfoGlobalSelectorRefreshQueued = true;
+    requestAnimationFrame(() => {
+        state.worldInfoGlobalSelectorRefreshQueued = false;
+
+        if (settings.worldInfoListOptimizationEnabled) {
+            refreshWorldInfoGlobalSelectorOptimization(state);
+        }
+    });
+}
+
+function refreshWorldInfoGlobalSelectorOptimization(state = getWorldInfoVueListOptimizationState()) {
+    if (!settings.worldInfoListOptimizationEnabled) {
+        return;
+    }
+
+    getWorldInfoGlobalSelectorSelects().forEach(select => {
+        enhanceWorldInfoGlobalSelector(select, state);
+    });
+
+    for (const select of Array.from(state.worldInfoGlobalSelectorSelects ?? [])) {
+        if (!select.isConnected) {
+            restoreWorldInfoGlobalSelector(select, state);
+        }
+    }
+}
+
+function getWorldInfoGlobalSelectorSelects(root = document) {
+    return Array.from(root.querySelectorAll?.([
+        '#WIMultiSelector select[multiple]',
+        'select#WIMultiSelector[multiple]',
+    ].join(',')) ?? [])
+        .filter(select => select instanceof HTMLSelectElement);
+}
+
+function getWorldInfoGlobalSelectorSelectByDisplay(displayEl, state = getWorldInfoVueListOptimizationState()) {
+    if (!(displayEl instanceof HTMLElement)) {
+        return null;
+    }
+
+    for (const select of Array.from(state.worldInfoGlobalSelectorSelects ?? [])) {
+        if (select?.[WORLD_INFO_GLOBAL_SELECTOR_STATE_KEY]?.displayEl === displayEl) {
+            return select;
+        }
+    }
+
+    return null;
+}
+
+function enhanceWorldInfoGlobalSelector(select, state = getWorldInfoVueListOptimizationState()) {
+    if (!(select instanceof HTMLSelectElement) || !select.multiple) {
+        return;
+    }
+
+    ensureWorldInfoGlobalSelectorOptionOrder(select);
+    captureWorldInfoGlobalSelectorTheme(select);
+
+    let selectState = select[WORLD_INFO_GLOBAL_SELECTOR_STATE_KEY];
+
+    if (!selectState) {
+        selectState = {
+            displayEl: null,
+            originalSelectDisplay: select.style.display,
+            originalSelect2Display: null,
+            optionObserver: null,
+            changeHandler: null,
+            triggerHandler: null,
+        };
+        select[WORLD_INFO_GLOBAL_SELECTOR_STATE_KEY] = selectState;
+        state.worldInfoGlobalSelectorSelects.add(select);
+
+        selectState.changeHandler = () => {
+            ensureWorldInfoGlobalSelectorOptionOrder(select);
+            refreshWorldInfoGlobalSelectorDisplay(select);
+            refreshWorldInfoGlobalSelectorDropdown(select);
+        };
+        select.addEventListener('change', selectState.changeHandler);
+
+        if (typeof MutationObserver === 'function') {
+            selectState.optionObserver = new MutationObserver(() => {
+                ensureWorldInfoGlobalSelectorOptionOrder(select);
+                refreshWorldInfoGlobalSelectorDisplay(select);
+                refreshWorldInfoGlobalSelectorDropdown(select);
+            });
+            selectState.optionObserver.observe(select, {
+                attributes: true,
+                attributeFilter: ['selected'],
+                childList: true,
+                subtree: true,
+            });
+        }
+    }
+
+    replaceWorldInfoGlobalSelectorDisplay(select);
+    refreshWorldInfoGlobalSelectorDisplay(select);
+    select.dataset[WORLD_INFO_GLOBAL_SELECTOR_DATASET_KEY] = 'true';
+}
+
+function restoreWorldInfoGlobalSelector(select, state = getWorldInfoVueListOptimizationState()) {
+    const selectState = select?.[WORLD_INFO_GLOBAL_SELECTOR_STATE_KEY];
+
+    if (!(select instanceof HTMLSelectElement) || !selectState) {
+        return;
+    }
+
+    select.removeEventListener('change', selectState.changeHandler);
+    selectState.optionObserver?.disconnect();
+    closeWorldInfoGlobalSelectorDropdown(state);
+
+    restoreWorldInfoGlobalSelectorOptionOrder(select);
+
+    const select2Container = getWorldInfoGlobalSelectorSelect2Container(select);
+
+    if (select2Container instanceof HTMLElement) {
+        select2Container.style.display = selectState.originalSelect2Display ?? '';
+    }
+
+    select.style.display = selectState.originalSelectDisplay ?? '';
+    selectState.displayEl?.remove();
+    delete select.dataset[WORLD_INFO_GLOBAL_SELECTOR_DATASET_KEY];
+    delete select[WORLD_INFO_GLOBAL_SELECTOR_STATE_KEY];
+    state.worldInfoGlobalSelectorSelects?.delete?.(select);
+}
+
+function captureWorldInfoGlobalSelectorTheme(select) {
+    if (!(select instanceof HTMLSelectElement) || select[WORLD_INFO_EDITOR_SELECT_STYLE_KEY]) {
+        return;
+    }
+
+    const selection = getWorldInfoGlobalSelectorSelect2Container(select)
+        ?.querySelector?.('.select2-selection--multiple, .select2-selection');
+
+    if (selection instanceof HTMLElement) {
+        captureWorldInfoControlTheme(select, selection);
+        return;
+    }
+
+    captureWorldInfoEditorSelectTheme(select);
+}
+
+function replaceWorldInfoGlobalSelectorDisplay(select) {
+    const selectState = select?.[WORLD_INFO_GLOBAL_SELECTOR_STATE_KEY];
+
+    if (!(select instanceof HTMLSelectElement) || !selectState) {
+        return;
+    }
+
+    if (selectState.displayEl?.isConnected) {
+        const select2Container = getWorldInfoGlobalSelectorSelect2Container(select);
+
+        if (select2Container instanceof HTMLElement) {
+            selectState.originalSelect2Display ??= select2Container.style.display;
+            select2Container.style.display = 'none';
+        }
+
+        bindWorldInfoGlobalSelectorDisplayTrigger(select, selectState.displayEl);
+        return;
+    }
+
+    const displayEl = document.createElement('div');
+    displayEl.className = `${WORLD_INFO_GLOBAL_SELECTOR_HOST_CLASS} bai-bai-wi-global-selector-display`;
+    displayEl.tabIndex = 0;
+    displayEl.role = 'button';
+    displayEl.setAttribute('aria-haspopup', 'listbox');
+    selectState.displayEl = displayEl;
+    bindWorldInfoGlobalSelectorDisplayTrigger(select, displayEl);
+
+    const select2Container = getWorldInfoGlobalSelectorSelect2Container(select);
+
+    if (select2Container instanceof HTMLElement) {
+        selectState.originalSelect2Display ??= select2Container.style.display;
+        select2Container.style.display = 'none';
+        select2Container.before(displayEl);
+    } else {
+        select.style.display = 'none';
+        select.after(displayEl);
+    }
+}
+
+function bindWorldInfoGlobalSelectorDisplayTrigger(select, displayEl) {
+    const selectState = select?.[WORLD_INFO_GLOBAL_SELECTOR_STATE_KEY];
+
+    if (!(select instanceof HTMLSelectElement) || !(displayEl instanceof HTMLElement) || !selectState) {
+        return;
+    }
+
+    if (selectState.triggerHandler) {
+        displayEl.removeEventListener('click', selectState.triggerHandler);
+        displayEl.removeEventListener('keydown', selectState.triggerHandler);
+    }
+
+    const triggerHandler = (event) => {
+        if (event.target instanceof Element && event.target.closest('.bai-bai-wi-global-selector-chip-remove')) {
+            return;
+        }
+
+        if (event.type === 'keydown' && ![' ', 'Enter', 'ArrowDown'].includes(event.key)) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const state = getWorldInfoVueListOptimizationState();
+
+        if (event.type === 'click' && state.worldInfoGlobalSelectorDropdown?.select === select) {
+            return;
+        }
+
+        if (event.type === 'click') {
+            openWorldInfoGlobalSelectorDropdown(select, state);
+            return;
+        }
+
+        toggleWorldInfoGlobalSelectorDropdown(select, state);
+    };
+
+    displayEl.addEventListener('click', triggerHandler);
+    displayEl.addEventListener('keydown', triggerHandler);
+    selectState.triggerHandler = triggerHandler;
+}
+
+function refreshWorldInfoGlobalSelectorDisplay(select) {
+    const selectState = select?.[WORLD_INFO_GLOBAL_SELECTOR_STATE_KEY];
+    const displayEl = selectState?.displayEl;
+
+    if (!(select instanceof HTMLSelectElement) || !(displayEl instanceof HTMLElement)) {
+        return;
+    }
+
+    displayEl.textContent = '';
+    const selectedOptions = getWorldInfoGlobalSelectorSelectedOptions(select);
+
+    if (selectedOptions.length === 0) {
+        const placeholder = document.createElement('span');
+        placeholder.className = 'bai-bai-wi-global-selector-placeholder';
+        placeholder.textContent = getWorldInfoGlobalSelectorPlaceholder(select);
+        displayEl.append(placeholder);
+        return;
+    }
+
+    selectedOptions.forEach(option => {
+        const chip = document.createElement('span');
+        chip.className = 'bai-bai-wi-global-selector-chip';
+        chip.dataset.value = option.value;
+
+        const label = document.createElement('span');
+        label.className = 'bai-bai-wi-global-selector-chip-label';
+        label.textContent = option.textContent?.trim() || option.value;
+
+        const removeButton = document.createElement('button');
+        removeButton.className = 'bai-bai-wi-global-selector-chip-remove';
+        removeButton.type = 'button';
+        removeButton.textContent = '×';
+        removeButton.title = '移除';
+        removeButton.setAttribute('aria-label', `移除 ${label.textContent}`);
+        removeButton.addEventListener('pointerdown', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            option.selected = false;
+            notifyWorldInfoGlobalSelectorChanged(select);
+            refreshWorldInfoGlobalSelectorDisplay(select);
+            refreshWorldInfoGlobalSelectorDropdown(select);
+        });
+
+        chip.append(label, removeButton);
+        displayEl.append(chip);
+    });
+}
+
+function ensureWorldInfoGlobalSelectorOptionOrder(select) {
+    const options = Array.from(select.options);
+    const existingIndexes = options
+        .map(option => Number.parseInt(option.dataset[WORLD_INFO_GLOBAL_SELECTOR_OPTION_ORDER_DATASET_KEY] ?? '', 10))
+        .filter(Number.isFinite);
+    let nextIndex = existingIndexes.length > 0 ? Math.max(...existingIndexes) + 1 : 0;
+
+    options.forEach(option => {
+        if (option.dataset[WORLD_INFO_GLOBAL_SELECTOR_OPTION_ORDER_DATASET_KEY]) {
+            return;
+        }
+
+        option.dataset[WORLD_INFO_GLOBAL_SELECTOR_OPTION_ORDER_DATASET_KEY] = String(nextIndex);
+        nextIndex += 1;
+    });
+}
+
+function toggleWorldInfoGlobalSelectorDropdown(select, state = getWorldInfoVueListOptimizationState()) {
+    if (state.worldInfoGlobalSelectorDropdown?.select === select) {
+        closeWorldInfoGlobalSelectorDropdown(state);
+        return;
+    }
+
+    openWorldInfoGlobalSelectorDropdown(select, state);
+}
+
+function openWorldInfoGlobalSelectorDropdown(select, state = getWorldInfoVueListOptimizationState()) {
+    const selectState = select?.[WORLD_INFO_GLOBAL_SELECTOR_STATE_KEY];
+    const displayEl = selectState?.displayEl;
+
+    if (!(select instanceof HTMLSelectElement) || !(displayEl instanceof HTMLElement)) {
+        return;
+    }
+
+    closeWorldInfoGlobalSelectorDropdown(state);
+    closeNativeWorldInfoGlobalSelectorSelect2(select);
+
+    const dropdown = document.createElement('div');
+    dropdown.className = WORLD_INFO_GLOBAL_SELECTOR_DROPDOWN_CLASS;
+    dropdown.dataset.baiBaiWorldInfoGlobalSelectorDropdown = 'true';
+
+    const searchBox = document.createElement('div');
+    searchBox.className = 'bai-bai-wi-global-selector-search-box';
+    const searchInput = document.createElement('input');
+    searchInput.className = 'bai-bai-wi-global-selector-search';
+    searchInput.type = 'search';
+    searchInput.placeholder = '搜索世界书...';
+    searchBox.append(searchInput);
+
+    const optionsContainer = document.createElement('div');
+    optionsContainer.className = 'bai-bai-wi-global-selector-options';
+    dropdown.append(searchBox, optionsContainer);
+
+    const stopDropdownEvent = (event) => event.stopPropagation();
+    ['pointerdown', 'mousedown', 'click', 'touchstart', 'touchend'].forEach(eventName => {
+        dropdown.addEventListener(eventName, stopDropdownEvent);
+    });
+
+    const renderOptions = () => renderWorldInfoGlobalSelectorDropdownOptions(select, optionsContainer, searchInput.value);
+    searchInput.addEventListener('input', renderOptions);
+    renderOptions();
+
+    const rect = displayEl.getBoundingClientRect();
+    const parentDialog = displayEl.closest('dialog');
+    const appendTarget = parentDialog instanceof HTMLElement ? parentDialog : document.body;
+    const maxHeight = Math.max(160, Math.min(360, window.innerHeight - rect.bottom - 10));
+
+    if (parentDialog instanceof HTMLElement) {
+        const scrollContainer = parentDialog.querySelector('.popup-body') || parentDialog;
+        const parentRect = parentDialog.getBoundingClientRect();
+        Object.assign(dropdown.style, {
+            left: `${rect.left - parentRect.left + scrollContainer.scrollLeft}px`,
+            maxHeight: `${maxHeight}px`,
+            top: `${rect.bottom - parentRect.top + scrollContainer.scrollTop + 2}px`,
+            width: `${rect.width}px`,
+        });
+    } else {
+        Object.assign(dropdown.style, {
+            left: `${rect.left + window.scrollX}px`,
+            maxHeight: `${maxHeight}px`,
+            top: `${rect.bottom + window.scrollY + 2}px`,
+            width: `${rect.width}px`,
+        });
+    }
+
+    appendTarget.append(dropdown);
+    displayEl.classList.add('bai-bai-wi-global-selector-open');
+
+    const closeHandler = (event) => {
+        const target = event.target instanceof Node ? event.target : null;
+
+        if (target && (dropdown.contains(target) || displayEl.contains(target))) {
+            return;
+        }
+
+        closeWorldInfoGlobalSelectorDropdown(state);
+    };
+    const keyHandler = (event) => {
+        if (event.key === 'Escape') {
+            closeWorldInfoGlobalSelectorDropdown(state);
+        }
+    };
+    const scrollHandler = (event) => {
+        if (event.target instanceof Node && dropdown.contains(event.target)) {
+            return;
+        }
+
+        closeWorldInfoGlobalSelectorDropdown(state);
+    };
+
+    document.addEventListener('pointerdown', closeHandler, true);
+    document.addEventListener('keydown', keyHandler, true);
+    window.addEventListener('scroll', scrollHandler, true);
+
+    state.worldInfoGlobalSelectorDropdown = {
+        select,
+        displayEl,
+        dropdown,
+        optionsContainer,
+        searchInput,
+        closeHandler,
+        keyHandler,
+        scrollHandler,
+    };
+
+    if (!isMobile()) {
+        requestAnimationFrame(() => searchInput.focus({ preventScroll: true }));
+    }
+}
+
+function closeNativeWorldInfoGlobalSelectorSelect2(select) {
+    const $select = globalThis.jQuery?.(select);
+
+    if (!$select?.data?.('select2') || typeof $select.select2 !== 'function') {
+        return;
+    }
+
+    try {
+        $select.select2('close');
+    } catch (error) {
+        console.debug(`${LOG_PREFIX} Failed to close native global world info select2`, error);
+    }
+}
+
+function closeWorldInfoGlobalSelectorDropdown(state = getWorldInfoVueListOptimizationState()) {
+    const dropdownState = state.worldInfoGlobalSelectorDropdown;
+
+    if (!dropdownState) {
+        return;
+    }
+
+    document.removeEventListener('pointerdown', dropdownState.closeHandler, true);
+    document.removeEventListener('keydown', dropdownState.keyHandler, true);
+    window.removeEventListener('scroll', dropdownState.scrollHandler, true);
+    dropdownState.displayEl?.classList?.remove?.('bai-bai-wi-global-selector-open');
+    dropdownState.dropdown?.remove?.();
+    state.worldInfoGlobalSelectorDropdown = null;
+}
+
+function refreshWorldInfoGlobalSelectorDropdown(select, state = getWorldInfoVueListOptimizationState()) {
+    const dropdownState = state.worldInfoGlobalSelectorDropdown;
+
+    if (!dropdownState || dropdownState.select !== select) {
+        return;
+    }
+
+    renderWorldInfoGlobalSelectorDropdownOptions(select, dropdownState.optionsContainer, dropdownState.searchInput?.value ?? '');
+}
+
+function renderWorldInfoGlobalSelectorDropdownOptions(select, optionsContainer, searchTerm = '') {
+    if (!(select instanceof HTMLSelectElement) || !(optionsContainer instanceof HTMLElement)) {
+        return;
+    }
+
+    optionsContainer.textContent = '';
+
+    const normalizedSearch = String(searchTerm).trim().toLowerCase();
+    const options = getWorldInfoGlobalSelectorSortedOptions(select)
+        .filter(option => {
+            const text = option.textContent?.trim() || option.value;
+            return !normalizedSearch || text.toLowerCase().includes(normalizedSearch);
+        });
+
+    if (options.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'bai-bai-wi-global-selector-empty';
+        empty.textContent = '没有找到匹配的世界书';
+        optionsContainer.append(empty);
+        return;
+    }
+
+    let renderedSelectedLabel = false;
+    let renderedOtherLabel = false;
+
+    options.forEach(option => {
+        const isSelected = isWorldInfoGlobalSelectorOptionSelected(option);
+
+        if (isSelected && !renderedSelectedLabel) {
+            renderedSelectedLabel = true;
+            optionsContainer.append(createWorldInfoGlobalSelectorGroupLabel('已启用'));
+        } else if (!isSelected && renderedSelectedLabel && !renderedOtherLabel) {
+            renderedOtherLabel = true;
+            optionsContainer.append(createWorldInfoGlobalSelectorGroupLabel('其他世界书'));
+        }
+
+        optionsContainer.append(createWorldInfoGlobalSelectorOption(select, option, isSelected));
+    });
+}
+
+function createWorldInfoGlobalSelectorGroupLabel(text) {
+    const label = document.createElement('div');
+    label.className = 'bai-bai-wi-global-selector-group';
+    label.textContent = text;
+    return label;
+}
+
+function createWorldInfoGlobalSelectorOption(select, option, isSelected) {
+    const optionEl = document.createElement('div');
+    optionEl.className = 'bai-bai-wi-global-selector-option';
+    optionEl.dataset.value = option.value;
+    optionEl.role = 'option';
+    optionEl.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    optionEl.classList.toggle('selected', isSelected);
+    optionEl.textContent = option.textContent?.trim() || option.value;
+
+    const handleSelect = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        option.selected = !option.selected;
+        notifyWorldInfoGlobalSelectorChanged(select);
+        refreshWorldInfoGlobalSelectorDisplay(select);
+        refreshWorldInfoGlobalSelectorDropdown(select);
+    };
+
+    optionEl.addEventListener('pointerdown', handleSelect);
+    return optionEl;
+}
+
+function getWorldInfoGlobalSelectorSortedOptions(select) {
+    return Array.from(select.options)
+        .filter(option => option.value !== '' && option.style.display !== 'none')
+        .sort((a, b) => {
+            const aRank = isWorldInfoGlobalSelectorOptionSelected(a) ? 0 : 1;
+            const bRank = isWorldInfoGlobalSelectorOptionSelected(b) ? 0 : 1;
+
+            if (aRank !== bRank) {
+                return aRank - bRank;
+            }
+
+            return getWorldInfoGlobalSelectorOptionOrder(a) - getWorldInfoGlobalSelectorOptionOrder(b);
+        });
+}
+
+function getWorldInfoGlobalSelectorSelectedOptions(select) {
+    return Array.from(select.selectedOptions)
+        .sort((a, b) => getWorldInfoGlobalSelectorOptionOrder(a) - getWorldInfoGlobalSelectorOptionOrder(b));
+}
+
+function notifyWorldInfoGlobalSelectorChanged(select) {
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const $select = globalThis.jQuery?.(select);
+
+    if ($select?.data?.('select2')) {
+        $select.trigger('change.select2');
+    }
+}
+
+function restoreWorldInfoGlobalSelectorOptionOrder(select) {
+    if (!(select instanceof HTMLSelectElement)) {
+        return;
+    }
+
+    const children = Array.from(select.children);
+
+    if (!children.every(child => child instanceof HTMLOptionElement)) {
+        return;
+    }
+
+    const selectedValues = new Set(Array.from(select.selectedOptions).map(option => option.value));
+    const fragment = document.createDocumentFragment();
+
+    children
+        .slice()
+        .sort((a, b) => getWorldInfoGlobalSelectorOptionOrder(a) - getWorldInfoGlobalSelectorOptionOrder(b))
+        .forEach(option => {
+            delete option.dataset[WORLD_INFO_GLOBAL_SELECTOR_OPTION_ORDER_DATASET_KEY];
+            fragment.append(option);
+        });
+
+    select.append(fragment);
+    Array.from(select.options).forEach(option => {
+        option.selected = selectedValues.has(option.value);
+    });
+}
+
+function isWorldInfoGlobalSelectorOptionSelected(option) {
+    if (option.selected) {
+        return true;
+    }
+
+    const selectedNames = new Set(normalizeWorldInfoNameList(selected_world_info));
+    const optionName = getWorldInfoOptionName(option);
+
+    return optionName ? selectedNames.has(optionName) : false;
+}
+
+function getWorldInfoGlobalSelectorPlaceholder(select) {
+    const placeholder = select.getAttribute('data-placeholder')
+        || select.getAttribute('placeholder')
+        || select.querySelector('option[value=""]')?.textContent
+        || '搜索/选择全局世界书...';
+
+    return String(placeholder).trim() || '搜索/选择全局世界书...';
+}
+
+function getWorldInfoGlobalSelectorSelect2Container(select) {
+    const select2Container = globalThis.jQuery?.(select).data?.('select2')?.$container?.[0]
+        ?? select.nextElementSibling;
+
+    return select2Container instanceof HTMLElement && select2Container.classList.contains('select2-container')
+        ? select2Container
+        : null;
+}
+
+function getWorldInfoGlobalSelectorOptionOrder(option) {
+    const parsed = Number.parseInt(option?.dataset?.[WORLD_INFO_GLOBAL_SELECTOR_OPTION_ORDER_DATASET_KEY] ?? '', 10);
+
+    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+}
+
 function installWorldInfoEditorSelectSearchInteractionGuard(state = getWorldInfoVueListOptimizationState()) {
     if (state.worldInfoEditorSelectSearchInteractionGuard) {
         return;
@@ -749,8 +1459,16 @@ function captureWorldInfoEditorSelectTheme(select) {
         return;
     }
 
-    const style = getComputedStyle(select);
-    select[WORLD_INFO_EDITOR_SELECT_STYLE_KEY] = {
+    captureWorldInfoControlTheme(select, select);
+}
+
+function captureWorldInfoControlTheme(target, source) {
+    if (!(target instanceof HTMLElement) || !(source instanceof HTMLElement) || target[WORLD_INFO_EDITOR_SELECT_STYLE_KEY]) {
+        return;
+    }
+
+    const style = getComputedStyle(source);
+    target[WORLD_INFO_EDITOR_SELECT_STYLE_KEY] = {
         backgroundColor: style.backgroundColor,
         borderBottomColor: style.borderBottomColor,
         borderBottomLeftRadius: style.borderBottomLeftRadius,
@@ -2274,7 +2992,172 @@ function installWorldInfoMobileHeaderLayoutStyle() {
     overflow-x: hidden;
 }
 
+#WIMultiSelector .bai-bai-wi-global-selector-display {
+    align-items: center;
+    background-color: var(--SmartThemeBlurTintColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
+    box-sizing: border-box;
+    color: var(--SmartThemeBodyColor);
+    cursor: pointer;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-height: 2.35em;
+    max-height: 7.6em;
+    min-width: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 4px 6px;
+    width: 100%;
+}
+
+#WIMultiSelector .bai-bai-wi-global-selector-display.bai-bai-wi-global-selector-open,
+#WIMultiSelector .bai-bai-wi-global-selector-display:focus-visible {
+    outline: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 45%, transparent);
+    outline-offset: 1px;
+}
+
+#WIMultiSelector .bai-bai-wi-global-selector-placeholder {
+    color: var(--SmartThemeBodyColor);
+    opacity: 0.62;
+    padding: 2px 0;
+}
+
+#WIMultiSelector .bai-bai-wi-global-selector-chip {
+    align-items: center;
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 13%, transparent);
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 18%, transparent);
+    border-radius: 6px;
+    box-sizing: border-box;
+    color: var(--SmartThemeBodyColor);
+    display: inline-flex;
+    gap: 4px;
+    line-height: 1.25;
+    max-width: 100%;
+    min-height: 24px;
+    overflow: hidden;
+    padding: 3px 5px 3px 8px;
+}
+
+#WIMultiSelector .bai-bai-wi-global-selector-chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#WIMultiSelector .bai-bai-wi-global-selector-chip-remove {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 50%;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-size: 16px;
+    height: 20px;
+    justify-content: center;
+    line-height: 1;
+    margin: 0;
+    opacity: 0.72;
+    padding: 0;
+    width: 20px;
+}
+
+#WIMultiSelector .bai-bai-wi-global-selector-chip-remove:hover {
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
+    opacity: 1;
+}
+
+.${WORLD_INFO_GLOBAL_SELECTOR_DROPDOWN_CLASS} {
+    background-color: var(--SmartThemeBlurTintColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.26);
+    box-sizing: border-box;
+    color: var(--SmartThemeBodyColor);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: absolute;
+    z-index: 30000;
+}
+
+.bai-bai-wi-global-selector-search-box {
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 75%, transparent);
+    flex: 0 0 auto;
+    padding: 6px 8px;
+}
+
+.bai-bai-wi-global-selector-search {
+    background-color: var(--SmartThemeBlurTintColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 4px;
+    box-sizing: border-box;
+    color: var(--SmartThemeBodyColor);
+    font: inherit;
+    min-height: 2.3em;
+    padding: 4px 8px;
+    width: 100%;
+}
+
+.bai-bai-wi-global-selector-options {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.bai-bai-wi-global-selector-group {
+    color: var(--SmartThemeBodyColor);
+    font-size: 12px;
+    font-weight: 700;
+    opacity: 0.68;
+    padding: 9px 10px 4px;
+}
+
+.bai-bai-wi-global-selector-option {
+    color: var(--SmartThemeBodyColor);
+    cursor: pointer;
+    line-height: 1.25;
+    min-height: 34px;
+    padding: 8px 10px;
+    user-select: none;
+}
+
+.bai-bai-wi-global-selector-option.selected {
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 14%, transparent);
+    font-weight: 600;
+}
+
+.bai-bai-wi-global-selector-option:hover {
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 18%, transparent);
+}
+
+.bai-bai-wi-global-selector-empty {
+    color: var(--SmartThemeBodyColor);
+    opacity: 0.62;
+    padding: 24px 12px;
+    text-align: center;
+}
+
 @media (max-width: 600px) {
+    #WIMultiSelector .bai-bai-wi-global-selector-display {
+        max-height: 6.8em;
+        min-height: 2.5em;
+    }
+
+    #WIMultiSelector .bai-bai-wi-global-selector-chip {
+        min-height: 28px;
+        padding: 4px 5px 4px 8px;
+    }
+
+    .bai-bai-wi-global-selector-option {
+        min-height: 40px;
+        padding: 10px 12px;
+    }
+
     #world_popup[data-bai-bai-world-info-popup-layout="true"] > .bai-bai-wi-popup-header {
         display: flex;
         flex-wrap: wrap;
