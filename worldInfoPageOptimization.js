@@ -258,6 +258,7 @@ const WORLD_INFO_EDITOR_SELECT_SEARCH_DATASET_KEY = 'baiBaiToolkitWorldInfoEdito
 const WORLD_INFO_EDITOR_SELECT_SEARCH_MOBILE_SUPPRESSED_DATASET_KEY = 'baiBaiToolkitWorldInfoEditorSelectSearchMobileSuppressed';
 const WORLD_INFO_EDITOR_SELECT_SEARCH_MOBILE_RESTORE_MS = 450;
 const WORLD_INFO_EDITOR_SELECT_STYLE_KEY = '__baiBaiToolkitWorldInfoEditorSelectStyle';
+const WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS = 'bai-bai-wi-editor-select-dropdown';
 const WORLD_INFO_ENTRY_DRAWER_TOGGLE_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer > .inline-drawer-header .inline-drawer-toggle';
 const WORLD_INFO_ENTRY_DRAWER_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer';
 const WORLD_INFO_LAZY_SELECT2_SELECTOR = '#world_popup_entries_list .world_entry_edit select[name="characterFilter"], #world_popup_entries_list .world_entry_edit select[name="triggers"]';
@@ -639,6 +640,7 @@ function ensureWorldInfoEditorSelectSearch(select = document.getElementById('wor
         searchInputPlaceholder: 'Search...',
         allowClear: true,
         closeOnSelect: true,
+        dropdownCssClass: WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS,
         multiple: false,
         minimumResultsForSearch: 0,
     });
@@ -654,6 +656,7 @@ function forceWorldInfoEditorSelectSearchField(select = document.getElementById(
 
     const field = document.querySelector('.select2-container--open .select2-search__field');
     syncWorldInfoEditorSelect2Theme(select);
+    syncWorldInfoEditorSelectDropdownTheme(select, field);
 
     if (!(field instanceof HTMLInputElement)) {
         return;
@@ -669,6 +672,74 @@ function forceWorldInfoEditorSelectSearchField(select = document.getElementById(
     }
 
     field.focus({ preventScroll: true });
+}
+
+function syncWorldInfoEditorSelectDropdownTheme(select, field = document.querySelector('.select2-container--open .select2-search__field')) {
+    if (!(select instanceof HTMLSelectElement)) {
+        return;
+    }
+
+    const select2 = globalThis.jQuery?.(select).data?.('select2');
+    const dropdown = select2?.dropdown?.$dropdown?.[0];
+
+    if (dropdown instanceof HTMLElement) {
+        dropdown.classList.add(WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS);
+    }
+
+    if (!(field instanceof HTMLInputElement)) {
+        return;
+    }
+
+    const referenceInput = getWorldInfoEditorSelectSearchReferenceInput();
+    const referenceStyle = referenceInput instanceof HTMLElement
+        ? getComputedStyle(referenceInput)
+        : select[WORLD_INFO_EDITOR_SELECT_STYLE_KEY];
+
+    if (!referenceStyle) {
+        return;
+    }
+
+    Object.assign(field.style, {
+        backgroundColor: referenceStyle.backgroundColor,
+        borderBottomColor: referenceStyle.borderBottomColor,
+        borderBottomLeftRadius: referenceStyle.borderBottomLeftRadius,
+        borderBottomRightRadius: referenceStyle.borderBottomRightRadius,
+        borderBottomStyle: referenceStyle.borderBottomStyle,
+        borderBottomWidth: referenceStyle.borderBottomWidth,
+        borderLeftColor: referenceStyle.borderLeftColor,
+        borderLeftStyle: referenceStyle.borderLeftStyle,
+        borderLeftWidth: referenceStyle.borderLeftWidth,
+        borderRightColor: referenceStyle.borderRightColor,
+        borderRightStyle: referenceStyle.borderRightStyle,
+        borderRightWidth: referenceStyle.borderRightWidth,
+        borderTopColor: referenceStyle.borderTopColor,
+        borderTopLeftRadius: referenceStyle.borderTopLeftRadius,
+        borderTopRightRadius: referenceStyle.borderTopRightRadius,
+        borderTopStyle: referenceStyle.borderTopStyle,
+        borderTopWidth: referenceStyle.borderTopWidth,
+        boxShadow: referenceStyle.boxShadow,
+        color: referenceStyle.color,
+        fontFamily: referenceStyle.fontFamily,
+        fontSize: referenceStyle.fontSize,
+        fontWeight: referenceStyle.fontWeight,
+        height: referenceStyle.height,
+        lineHeight: referenceStyle.lineHeight,
+        opacity: '1',
+        paddingBottom: referenceStyle.paddingBottom,
+        paddingLeft: referenceStyle.paddingLeft,
+        paddingRight: referenceStyle.paddingRight,
+        paddingTop: referenceStyle.paddingTop,
+    });
+}
+
+function getWorldInfoEditorSelectSearchReferenceInput() {
+    const directInput = document.getElementById('world_info_search');
+
+    if (directInput instanceof HTMLInputElement) {
+        return directInput;
+    }
+
+    return document.querySelector('#world_popup input[type="search"], #world_popup input[type="text"], #world_popup input:not([type])');
 }
 
 function captureWorldInfoEditorSelectTheme(select) {
@@ -2270,6 +2341,40 @@ function installWorldInfoMobileHeaderLayoutStyle() {
         position: static !important;
         top: auto !important;
         width: 0 !important;
+    }
+
+    .${WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS} .select2-search--dropdown {
+        padding: 6px 8px;
+    }
+
+    .${WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS} .select2-search--dropdown .select2-search__field {
+        background-color: var(--SmartThemeBlurTintColor);
+        border-color: var(--SmartThemeBorderColor);
+        color: var(--SmartThemeBodyColor);
+        min-height: 2.25em;
+        opacity: 1 !important;
+        width: 100%;
+    }
+
+    .${WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS} .select2-results__group {
+        color: var(--SmartThemeBodyColor);
+        font-weight: 700;
+        padding: 10px 6px 6px;
+    }
+
+    .${WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS} .select2-results__option {
+        padding-left: 6px !important;
+    }
+
+    .${WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS} .select2-results__option::before,
+    .${WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS} .select2-results__option::after {
+        content: none !important;
+        display: none !important;
+    }
+
+    .${WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS} .select2-results__option input[type="checkbox"],
+    .${WORLD_INFO_EDITOR_SELECT_DROPDOWN_CLASS} .select2-results__option .checkbox {
+        display: none !important;
     }
 
     #world_popup[data-bai-bai-world-info-popup-layout="true"] > .bai-bai-wi-popup-header > #world_info_pagination {
