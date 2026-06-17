@@ -253,6 +253,7 @@ const WORLD_INFO_VUE_LIST_OPTIMIZATION_KEY = '__baiBaiToolkitWorldInfoVueListOpt
 const WORLD_INFO_VUE_LIST_MODULE_PATH = './vendor/vue.esm-browser.prod.js';
 const WORLD_INFO_MOBILE_HEADER_LAYOUT_STYLE_ID = 'bai_bai_toolkit_world_info_mobile_header_layout_style';
 const WORLD_INFO_EDITOR_SELECT_GROUPING_DATASET_KEY = 'baiBaiToolkitWorldInfoEditorSelectGrouped';
+const WORLD_INFO_EDITOR_SELECT_SEARCH_DATASET_KEY = 'baiBaiToolkitWorldInfoEditorSelectSearch';
 const WORLD_INFO_ENTRY_DRAWER_TOGGLE_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer > .inline-drawer-header .inline-drawer-toggle';
 const WORLD_INFO_ENTRY_DRAWER_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer';
 const WORLD_INFO_LAZY_SELECT2_SELECTOR = '#world_popup_entries_list .world_entry_edit select[name="characterFilter"], #world_popup_entries_list .world_entry_edit select[name="triggers"]';
@@ -328,6 +329,7 @@ export function applyWorldInfoListOptimization() {
     if (state.enabled) {
         installWorldInfoVueListPaginationPatch(state);
         installWorldInfoEditorSelectGrouping(state);
+        installWorldInfoEditorSelectSearch(state);
         installWorldInfoMobileHeaderLayoutStyle();
         installWorldInfoMobileHeaderLayoutWatcher(state);
         installWorldInfoMobileLayoutMutationObserver(state);
@@ -335,6 +337,7 @@ export function applyWorldInfoListOptimization() {
         unmountWorldInfoVueListApp(state);
         restoreWorldInfoVueListPaginationPatch(state);
         removeWorldInfoEditorSelectGrouping(state);
+        removeWorldInfoEditorSelectSearch(state);
         removeWorldInfoMobileLayoutMutationObserver(state);
         removeWorldInfoMobileHeaderLayoutWatcher(state);
         restoreWorldInfoPopupLayout();
@@ -364,6 +367,7 @@ function getWorldInfoVueListOptimizationState() {
             worldInfoEditorSelectOpenHandler: null,
             worldInfoEditorSelectKeyHandler: null,
             worldInfoEditorSelectSelect2Handler: null,
+            worldInfoEditorSelectSearchOpenHandler: null,
             worldInfoEditorSelectGroupingApplying: false,
         };
     }
@@ -493,6 +497,96 @@ function removeWorldInfoEditorSelectGrouping(state = getWorldInfoVueListOptimiza
     }
 
     restoreWorldInfoEditorSelectOrder(state);
+}
+
+function installWorldInfoEditorSelectSearch(state = getWorldInfoVueListOptimizationState()) {
+    ensureWorldInfoEditorSelectSearch();
+
+    if (state.worldInfoEditorSelectSearchOpenHandler || !globalThis.jQuery) {
+        return;
+    }
+
+    const openHandler = (event) => {
+        const select = event.target instanceof HTMLSelectElement && event.target.id === 'world_editor_select'
+            ? event.target
+            : null;
+
+        if (!select) {
+            return;
+        }
+
+        requestAnimationFrame(() => forceWorldInfoEditorSelectSearchField(select));
+    };
+
+    globalThis.jQuery(document).on('select2:open.baiBaiToolkitWorldInfoEditorSelectSearch', '#world_editor_select', openHandler);
+    state.worldInfoEditorSelectSearchOpenHandler = openHandler;
+}
+
+function removeWorldInfoEditorSelectSearch(state = getWorldInfoVueListOptimizationState()) {
+    if (state.worldInfoEditorSelectSearchOpenHandler) {
+        globalThis.jQuery?.(document).off('select2:open.baiBaiToolkitWorldInfoEditorSelectSearch', '#world_editor_select', state.worldInfoEditorSelectSearchOpenHandler);
+        state.worldInfoEditorSelectSearchOpenHandler = null;
+    }
+
+    const select = document.getElementById('world_editor_select');
+
+    if (!(select instanceof HTMLSelectElement) || select.dataset[WORLD_INFO_EDITOR_SELECT_SEARCH_DATASET_KEY] !== 'true') {
+        return;
+    }
+
+    const $select = globalThis.jQuery?.(select);
+
+    if ($select?.data?.('select2')) {
+        $select.select2('destroy');
+    }
+
+    delete select.dataset[WORLD_INFO_EDITOR_SELECT_SEARCH_DATASET_KEY];
+}
+
+function ensureWorldInfoEditorSelectSearch(select = document.getElementById('world_editor_select')) {
+    if (!(select instanceof HTMLSelectElement) || typeof globalThis.jQuery?.fn?.select2 !== 'function') {
+        return;
+    }
+
+    const $select = globalThis.jQuery(select);
+    const select2 = $select.data('select2');
+
+    if (select2) {
+        select2.options?.set?.('minimumResultsForSearch', 0);
+        select2.options?.set?.('searchInputPlaceholder', 'Search...');
+        return;
+    }
+
+    const placeholder = select.querySelector('option[value=""]')?.textContent?.trim() || '--- Pick to Edit ---';
+
+    $select.select2({
+        width: '100%',
+        placeholder,
+        searchInputPlaceholder: 'Search...',
+        allowClear: true,
+        closeOnSelect: true,
+        multiple: false,
+        minimumResultsForSearch: 0,
+    });
+
+    select.dataset[WORLD_INFO_EDITOR_SELECT_SEARCH_DATASET_KEY] = 'true';
+}
+
+function forceWorldInfoEditorSelectSearchField(select = document.getElementById('world_editor_select')) {
+    if (!(select instanceof HTMLSelectElement) || !globalThis.jQuery?.(select).data?.('select2')) {
+        return;
+    }
+
+    const field = document.querySelector('.select2-container--open .select2-search__field');
+
+    if (!(field instanceof HTMLInputElement)) {
+        return;
+    }
+
+    field.closest('.select2-search')?.classList.remove('select2-search--hide');
+    field.placeholder = field.placeholder || 'Search...';
+    field.removeAttribute('readonly');
+    field.focus({ preventScroll: true });
 }
 
 function getWorldInfoEditorSelectFromOpenEvent(target) {
