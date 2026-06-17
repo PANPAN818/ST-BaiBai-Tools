@@ -1556,18 +1556,22 @@ function syncWorldInfoEditorSelect2Theme(select) {
 
     if (rendered instanceof HTMLElement) {
         Object.assign(rendered.style, {
+            alignItems: 'center',
             color: capturedStyle.color,
-            display: 'block',
+            display: 'flex',
             flex: '1 1 auto',
             fontFamily: capturedStyle.fontFamily,
             fontSize: capturedStyle.fontSize,
             fontWeight: capturedStyle.fontWeight,
-            lineHeight: '1.2',
+            lineHeight: 'normal',
             minWidth: '0',
-            paddingBottom: '0',
+            overflow: 'hidden',
+            paddingBottom: '2px',
             paddingLeft: capturedStyle.paddingLeft,
             paddingRight: '28px',
-            paddingTop: '0',
+            paddingTop: '2px',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
         });
     }
 
@@ -3201,13 +3205,18 @@ function installWorldInfoMobileHeaderLayoutStyle() {
     }
 
     #world_popup[data-bai-bai-world-info-popup-layout="true"] > .bai-bai-wi-popup-header > .select2-container .select2-selection__rendered {
+        align-items: center;
         color: var(--SmartThemeBodyColor);
+        display: flex !important;
         flex: 1 1 auto;
-        line-height: 1.2 !important;
+        line-height: normal !important;
         min-width: 0;
-        padding-bottom: 0 !important;
+        overflow: hidden;
+        padding-bottom: 2px !important;
         padding-right: 28px !important;
-        padding-top: 0 !important;
+        padding-top: 2px !important;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     #world_popup[data-bai-bai-world-info-popup-layout="true"] > .bai-bai-wi-popup-header > .select2-container .select2-selection__placeholder {
