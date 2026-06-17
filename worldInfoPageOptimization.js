@@ -1346,7 +1346,8 @@ function applyWorldInfoMobileExpandedLayout(edit) {
     const primaryKeyBlock = keywordsBlock?.querySelector(':scope > .keyprimary');
     const logicBlock = keywordsBlock?.querySelector(':scope > .world_entry_form_control:not(.keyprimary):not(.keysecondary)');
     const secondaryKeyBlock = keywordsBlock?.querySelector(':scope > .keysecondary');
-    const contentControl = contentBlock?.querySelector('textarea[name="content"]')?.closest('.world_entry_form_control');
+    const contentTextarea = contentBlock?.querySelector('textarea[name="content"]');
+    const contentControl = contentTextarea?.closest('.world_entry_form_control');
     const contentHeader = contentControl?.querySelector('label[for="content "] small > span.alignitemscenter');
     const contentTitleGroup = contentHeader?.querySelector(':scope > .alignitemscenter.flex-container');
     const contentMeta = Array.from(contentHeader?.children ?? [])
@@ -1378,6 +1379,7 @@ function applyWorldInfoMobileExpandedLayout(edit) {
     }
 
     const tokenGapTextNode = compactWorldInfoMobileTokenGap(contentMeta);
+    const contentTextareaRowsState = setWorldInfoMobileContentTextareaRows(contentTextarea, 14);
 
     if (contentMaximize instanceof HTMLElement) {
         contentMaximize.classList.add('bai-bai-wi-mobile-content-maximize');
@@ -1455,6 +1457,7 @@ function applyWorldInfoMobileExpandedLayout(edit) {
         contentMeta,
         contentMaximize,
         tokenGapTextNode,
+        contentTextareaRowsState,
         recursionOptions,
         contentBlock,
         extraDrawer,
@@ -1494,6 +1497,32 @@ function compactWorldInfoMobileTokenGap(contentMeta) {
     return state;
 }
 
+function setWorldInfoMobileContentTextareaRows(textarea, rows) {
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+        return null;
+    }
+
+    const state = {
+        textarea,
+        rowsAttribute: textarea.getAttribute('rows'),
+    };
+
+    textarea.rows = rows;
+    return state;
+}
+
+function restoreWorldInfoMobileContentTextareaRows(state) {
+    if (!(state?.textarea instanceof HTMLTextAreaElement)) {
+        return;
+    }
+
+    if (state.rowsAttribute === null) {
+        state.textarea.removeAttribute('rows');
+    } else {
+        state.textarea.setAttribute('rows', state.rowsAttribute);
+    }
+}
+
 function restoreWorldInfoMobileExpandedLayout(edit) {
     const state = edit?.__baiBaiWorldInfoMobileExpandedLayout;
 
@@ -1523,6 +1552,8 @@ function restoreWorldInfoMobileExpandedLayout(edit) {
     if (state.tokenGapTextNode?.node?.nodeType === Node.TEXT_NODE) {
         state.tokenGapTextNode.node.nodeValue = state.tokenGapTextNode.value;
     }
+
+    restoreWorldInfoMobileContentTextareaRows(state.contentTextareaRowsState);
 
     [
         state.contentHeader,
@@ -2157,6 +2188,126 @@ function installWorldInfoMobileHeaderLayoutStyle() {
         flex-flow: column;
         align-items: stretch;
         gap: 6px;
+    }
+
+    #world_popup[data-bai-bai-world-info-popup-layout="true"] {
+        display: block !important;
+        flex-direction: initial !important;
+        flex-wrap: initial !important;
+        align-items: initial !important;
+        justify-content: initial !important;
+        gap: initial !important;
+        row-gap: initial !important;
+    }
+
+    #world_popup[data-bai-bai-world-info-popup-layout="true"] > .bai-bai-wi-popup-header {
+        display: flex !important;
+        order: initial !important;
+    }
+
+    #world_popup[data-bai-bai-world-info-popup-layout="true"] > .bai-bai-wi-popup-header > * {
+        order: initial !important;
+    }
+
+    #world_popup[data-bai-bai-world-info-popup-layout="true"] > .bai-bai-wi-popup-header > .bai-bai-wi-popup-source-stash {
+        display: none !important;
+    }
+
+    #world_popup[data-bai-bai-world-info-popup-layout="true"] > #world_popup_entries_list {
+        display: block !important;
+        order: initial !important;
+        width: 100% !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] {
+        min-height: 0 !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] > .world_entry_form.wi-card-entry {
+        position: relative !important;
+        padding-top: 10px !important;
+        padding-bottom: 10px !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-hidden-stash {
+        display: none !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-header,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-header-grid,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-footer,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-title-cell,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-state-cell,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-menu-cell,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-position-cell,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-depth-cell,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-enabled-cell,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-number-group,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-action-group,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-expand-slot {
+        position: static !important;
+        inset: auto !important;
+        top: auto !important;
+        right: auto !important;
+        bottom: auto !important;
+        left: auto !important;
+        z-index: auto !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-header .drag-handle,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-header .killSwitch,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-header .move_entry_button,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-header .duplicate_entry_button,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-header .delete_entry_button,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-header .inline-drawer-toggle {
+        position: static !important;
+        inset: auto !important;
+        top: auto !important;
+        right: auto !important;
+        bottom: auto !important;
+        left: auto !important;
+        z-index: auto !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-title-cell .WIEntryTitleAndStatus.flex-container.flex1.alignitemscenter,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-title-cell .WIEntryTitleAndStatus > .flex-container,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-position-cell [name="PositionBlock"],
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-depth-cell .world_entry_form_control,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-number-group .world_entry_form_control,
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-number-group .probabilityContainer {
+        min-height: 0 !important;
+        margin-right: 0 !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-position-cell .world_entry_form_control[name="PositionBlock"] {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: none !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .world_entry_edit[data-bai-bai-world-info-mobile-expanded-layout="true"] {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 8px !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .world_entry_edit[data-bai-bai-world-info-mobile-expanded-layout="true"] > .bai-bai-wi-mobile-expanded-main {
+        display: flex !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .world_entry_edit[data-bai-bai-world-info-mobile-expanded-layout="true"] > .bai-bai-wi-mobile-expanded-extra {
+        display: flex !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-expanded-main [name="keywordsAndLogicBlock"] {
+        display: block !important;
+    }
+
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-expanded-main [name="contentAndCharFilterBlock"],
+    #world_popup_entries_list > .world_entry[data-bai-bai-world-info-mobile-header-layout="true"] .bai-bai-wi-mobile-expanded-main [name="contentAndCharFilterBlock"] .world_entry_form_control {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
     }
 }
 `;
