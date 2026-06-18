@@ -59,6 +59,7 @@ const MOBILE_MESSAGE_EDIT_SCROLL_RESTORE_TOLERANCE = 2;
 const MOBILE_MESSAGE_EDIT_SCROLL_RESTORE_DELAYS = [0, 50, 160];
 const MOBILE_MESSAGE_EDIT_CARET_VISIBLE_PADDING = 24;
 const MOBILE_MESSAGE_EDIT_CARET_CONTEXT_LINES = 2;
+const MOBILE_MESSAGE_EDIT_EDITOR_SCROLL_INTENT_MS = 1200;
 const CHAT_GENERATION_ACTION_SELECTOR = '#send_but, #option_regenerate, #option_continue, #option_impersonate, #mes_continue, #mes_impersonate';
 const CHAT_MESSAGE_EDIT_SELECTOR = '#chat .mes_edit';
 const WELCOME_PANEL_SELECTOR = '#chat .welcomePanel';
@@ -2586,7 +2587,10 @@ function handleMobileMessageEditScrollGuardEntryEvent(event) {
 
     const editor = target.closest(MOBILE_MESSAGE_EDIT_SELECTOR);
     if (editor instanceof HTMLElement) {
-        captureMobileMessageEditScrollGuard('edit interaction', editor, { force: true });
+        captureMobileMessageEditScrollGuard('edit interaction', editor, {
+            force: event.type !== 'click' || !hasActiveMobileMessageEditScrollGuardForEditor(editor),
+        });
+        markMobileMessageEditEditorScrollIntent(editor);
         return;
     }
 
@@ -2602,7 +2606,9 @@ function handleMobileMessageEditScrollGuardFocusIn(event) {
     if (isMobileMessageEditScrollGuardEnabled()
         && target instanceof HTMLElement
         && target.matches(MOBILE_MESSAGE_EDIT_SELECTOR)) {
-        captureMobileMessageEditScrollGuard('edit focusin', target, { force: true });
+        captureMobileMessageEditScrollGuard('edit focusin', target, {
+            force: !hasActiveMobileMessageEditScrollGuardForEditor(target),
+        });
         return;
     }
 
@@ -2674,14 +2680,21 @@ function ensureMobileMessageEditScrollGuardActiveListeners() {
     const userScrollIntentHandler = () => {
         handleMobileMessageEditUserScrollIntent();
     };
+    const editorScrollIntentHandler = (event) => {
+        handleMobileMessageEditEditorScrollIntent(event);
+    };
 
     document.addEventListener('touchmove', userScrollIntentHandler, { capture: true, passive: true });
+    document.addEventListener('touchmove', editorScrollIntentHandler, { capture: true, passive: true });
     document.addEventListener('wheel', userScrollIntentHandler, { capture: true, passive: true });
+    document.addEventListener('wheel', editorScrollIntentHandler, { capture: true, passive: true });
+    document.addEventListener('scroll', editorScrollIntentHandler, true);
     window.addEventListener('resize', resizeHandler, true);
     window.visualViewport?.addEventListener('resize', resizeHandler, true);
 
     extensionState.mobileMessageEditScrollGuardResizeHandler = resizeHandler;
     extensionState.mobileMessageEditScrollGuardUserScrollIntentHandler = userScrollIntentHandler;
+    extensionState.mobileMessageEditScrollGuardEditorScrollIntentHandler = editorScrollIntentHandler;
     extensionState.mobileMessageEditScrollGuardActiveListenersInstalled = true;
 }
 
@@ -2696,10 +2709,16 @@ function stopMobileMessageEditScrollGuardActiveObservers() {
 
     const resizeHandler = extensionState.mobileMessageEditScrollGuardResizeHandler;
     const userScrollIntentHandler = extensionState.mobileMessageEditScrollGuardUserScrollIntentHandler;
+    const editorScrollIntentHandler = extensionState.mobileMessageEditScrollGuardEditorScrollIntentHandler;
 
     if (userScrollIntentHandler) {
         document.removeEventListener('touchmove', userScrollIntentHandler, true);
         document.removeEventListener('wheel', userScrollIntentHandler, true);
+    }
+    if (editorScrollIntentHandler) {
+        document.removeEventListener('touchmove', editorScrollIntentHandler, true);
+        document.removeEventListener('wheel', editorScrollIntentHandler, true);
+        document.removeEventListener('scroll', editorScrollIntentHandler, true);
     }
     if (resizeHandler) {
         window.removeEventListener('resize', resizeHandler, true);
@@ -2708,6 +2727,7 @@ function stopMobileMessageEditScrollGuardActiveObservers() {
 
     extensionState.mobileMessageEditScrollGuardResizeHandler = null;
     extensionState.mobileMessageEditScrollGuardUserScrollIntentHandler = null;
+    extensionState.mobileMessageEditScrollGuardEditorScrollIntentHandler = null;
     extensionState.mobileMessageEditScrollGuardActiveListenersInstalled = false;
 }
 
@@ -2788,9 +2808,9 @@ function captureMobileMessageEditScrollGuard(reason, editor = null, { force = fa
         caretVisibleTimers: [],
         caretVisibleCheckScheduled: false,
         userScrollIntentUntil: 0,
+        editorScrollIntentUntil: 0,
     };
     ensureMobileMessageEditScrollGuardActiveObservers(extensionState.mobileMessageEditScrollGuard);
-    scheduleMobileMessageEditCaretVisibleCheck(extensionState.mobileMessageEditScrollGuard);
 }
 
 function stopMobileMessageEditScrollGuard({ removeEntryObservers = false } = {}) {
@@ -2811,13 +2831,19 @@ function clearMobileMessageEditScrollRestoreTimers(guard = extensionState.mobile
         guard.restoreTimers.forEach(timer => clearTimeout(timer));
         guard.restoreTimers = [];
     }
+    clearMobileMessageEditCaretVisibleTimers(guard);
+    if (guard) {
+        guard.restoreScheduled = false;
+        guard.restoreReason = '';
+    }
+}
+
+function clearMobileMessageEditCaretVisibleTimers(guard = extensionState.mobileMessageEditScrollGuard) {
     if (guard?.caretVisibleTimers?.length) {
         guard.caretVisibleTimers.forEach(timer => clearTimeout(timer));
         guard.caretVisibleTimers = [];
     }
     if (guard) {
-        guard.restoreScheduled = false;
-        guard.restoreReason = '';
         guard.caretVisibleCheckScheduled = false;
     }
 }
@@ -2864,6 +2890,32 @@ function handleMobileMessageEditUserScrollIntent() {
     guard.userScrollIntentUntil = Date.now() + 700;
 }
 
+function hasActiveMobileMessageEditScrollGuardForEditor(editor) {
+    const guard = getActiveMobileMessageEditScrollGuard();
+
+    return Boolean(guard && guard.editor === editor);
+}
+
+function handleMobileMessageEditEditorScrollIntent(event) {
+    const target = event?.target instanceof Element ? event.target : null;
+    const editor = target?.closest?.(MOBILE_MESSAGE_EDIT_SELECTOR);
+
+    if (editor instanceof HTMLElement) {
+        markMobileMessageEditEditorScrollIntent(editor);
+    }
+}
+
+function markMobileMessageEditEditorScrollIntent(editor) {
+    const guard = getActiveMobileMessageEditScrollGuard();
+
+    if (!guard || guard.editor !== editor) {
+        return;
+    }
+
+    guard.editorScrollIntentUntil = Date.now() + MOBILE_MESSAGE_EDIT_EDITOR_SCROLL_INTENT_MS;
+    clearMobileMessageEditCaretVisibleTimers(guard);
+}
+
 function scheduleMobileMessageEditScrollRestore(reason) {
     const guard = getActiveMobileMessageEditScrollGuard();
 
@@ -2906,49 +2958,15 @@ function restoreMobileMessageEditScroll(reason) {
     const desiredScrollTop = Number(guard.scrollTop || 0);
 
     if (Math.abs(guard.chat.scrollTop - desiredScrollTop) <= MOBILE_MESSAGE_EDIT_SCROLL_RESTORE_TOLERANCE) {
-        ensureMobileMessageEditCaretVisible(guard.editor);
         return;
     }
 
     try {
         extensionState.mobileMessageEditScrollRestoreActive = true;
         guard.chat.scrollTop = desiredScrollTop;
-        ensureMobileMessageEditCaretVisible(guard.editor);
         console.debug(`${LOG_PREFIX} Restored message edit chat scroll after ${reason}: ${desiredScrollTop}`);
     } finally {
         extensionState.mobileMessageEditScrollRestoreActive = false;
-    }
-}
-
-function scheduleMobileMessageEditCaretVisibleCheck(guard = getActiveMobileMessageEditScrollGuard()) {
-    if (!guard) {
-        return;
-    }
-
-    if (guard.caretVisibleCheckScheduled) {
-        return;
-    }
-
-    guard.caretVisibleCheckScheduled = true;
-
-    requestAnimationFrame(() => {
-        if (extensionState.mobileMessageEditScrollGuard === guard) {
-            ensureMobileMessageEditCaretVisible(guard.editor);
-        }
-    });
-
-    for (const delay of MOBILE_MESSAGE_EDIT_SCROLL_RESTORE_DELAYS) {
-        const timer = setTimeout(() => {
-            if (extensionState.mobileMessageEditScrollGuard === guard) {
-                ensureMobileMessageEditCaretVisible(guard.editor);
-            }
-            guard.caretVisibleTimers = guard.caretVisibleTimers.filter(value => value !== timer);
-            if (guard.caretVisibleTimers.length === 0) {
-                guard.caretVisibleCheckScheduled = false;
-            }
-        }, delay);
-
-        guard.caretVisibleTimers.push(timer);
     }
 }
 
@@ -2956,7 +2974,8 @@ function ensureMobileMessageEditCaretVisible(editor) {
     if (!(editor instanceof HTMLTextAreaElement)
         || !editor.isConnected
         || editor.scrollHeight <= editor.clientHeight
-        || typeof editor.selectionStart !== 'number') {
+        || typeof editor.selectionStart !== 'number'
+        || shouldSuppressMobileMessageEditCaretScroll(editor)) {
         return;
     }
 
@@ -2984,6 +3003,16 @@ function ensureMobileMessageEditCaretVisible(editor) {
             caretBottom - editor.clientHeight + bottomContext,
         );
     }
+}
+
+function shouldSuppressMobileMessageEditCaretScroll(editor) {
+    const guard = getActiveMobileMessageEditScrollGuard();
+
+    return Boolean(
+        guard
+        && guard.editor === editor
+        && Date.now() < Number(guard.editorScrollIntentUntil || 0),
+    );
 }
 
 function getTextareaCaretContentTop(editor, caretOffset) {
@@ -3178,6 +3207,7 @@ function markMobileAutoKeyboardDirectFocusIntent(event) {
 
     if (isMobileMessageEditScrollGuardEnabled() && editTarget instanceof HTMLElement) {
         captureMobileMessageEditScrollGuard('direct edit focus intent', editTarget, { force: true });
+        markMobileMessageEditEditorScrollIntent(editTarget);
 
         // Record coordinates to distinguish between scroll and click
         const touch = event.touches?.[0] || event;
@@ -3253,7 +3283,9 @@ function handleMobileAutoKeyboardFocusIn(event) {
     }
 
     if (isMobileMessageEditScrollGuardEnabled() && target.matches(MOBILE_MESSAGE_EDIT_SELECTOR)) {
-        captureMobileMessageEditScrollGuard('edit focusin', target, { force: true });
+        captureMobileMessageEditScrollGuard('edit focusin', target, {
+            force: !hasActiveMobileMessageEditScrollGuardForEditor(target),
+        });
     }
 
     if (!shouldSuppressMobileAutoKeyboardFocus(target)) {
