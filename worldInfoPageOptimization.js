@@ -3230,54 +3230,72 @@ function installWorldInfoMobileHeaderLayoutStyle() {
     z-index: 30000;
 }
 
-.bai-bai-wi-global-selector-search-box {
+.${WORLD_INFO_GLOBAL_SELECTOR_DROPDOWN_CLASS} .bai-bai-wi-global-selector-search-box {
     border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 75%, transparent);
+    box-sizing: border-box;
     flex: 0 0 auto;
     padding: 6px 8px;
     position: relative;
 }
 
-.bai-bai-wi-global-selector-search {
-    background-color: var(--SmartThemeBlurTintColor);
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 4px;
-    box-sizing: border-box;
-    color: var(--SmartThemeBodyColor);
-    font: inherit;
-    min-height: 2.3em;
-    padding: 4px 34px 4px 8px;
-    width: 100%;
+.${WORLD_INFO_GLOBAL_SELECTOR_DROPDOWN_CLASS} .bai-bai-wi-global-selector-search {
+    background-color: var(--SmartThemeBlurTintColor) !important;
+    border: 1px solid var(--SmartThemeBorderColor) !important;
+    border-radius: 4px !important;
+    box-sizing: border-box !important;
+    color: var(--SmartThemeBodyColor) !important;
+    display: block !important;
+    font: inherit !important;
+    margin: 0 !important;
+    min-height: 2.3em !important;
+    padding: 4px 34px 4px 8px !important;
+    width: 100% !important;
 }
 
-.bai-bai-wi-global-selector-search::-webkit-search-cancel-button {
-    display: none;
+.${WORLD_INFO_GLOBAL_SELECTOR_DROPDOWN_CLASS} .bai-bai-wi-global-selector-search::-webkit-search-cancel-button {
+    display: none !important;
 }
 
-.bai-bai-wi-global-selector-search-clear {
-    align-items: center;
-    background: transparent;
-    border: 0;
-    border-radius: 50%;
-    color: var(--SmartThemeBodyColor);
-    cursor: pointer;
-    display: flex;
-    font-size: 18px;
-    height: 28px;
-    justify-content: center;
-    line-height: 1;
-    margin: 0;
-    opacity: 0.7;
-    padding: 0;
-    position: absolute;
-    right: 11px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 28px;
+.${WORLD_INFO_GLOBAL_SELECTOR_DROPDOWN_CLASS} .bai-bai-wi-global-selector-search-clear {
+    align-items: center !important;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    box-shadow: none !important;
+    box-sizing: border-box !important;
+    color: var(--SmartThemeBodyColor) !important;
+    cursor: pointer !important;
+    display: flex !important;
+    flex: 0 0 auto !important;
+    font-size: 18px !important;
+    height: 28px !important;
+    justify-content: center !important;
+    line-height: 1 !important;
+    margin: 0 !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    opacity: 0.7 !important;
+    padding: 0 !important;
+    position: absolute !important;
+    right: 11px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    width: 28px !important;
 }
 
-.bai-bai-wi-global-selector-search-clear:hover {
-    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
-    opacity: 1;
+.${WORLD_INFO_GLOBAL_SELECTOR_DROPDOWN_CLASS} .bai-bai-wi-global-selector-search-clear:focus,
+.${WORLD_INFO_GLOBAL_SELECTOR_DROPDOWN_CLASS} .bai-bai-wi-global-selector-search-clear:focus-visible,
+.${WORLD_INFO_GLOBAL_SELECTOR_DROPDOWN_CLASS} .bai-bai-wi-global-selector-search-clear:active {
+    background-color: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+@media (hover: hover) {
+    .${WORLD_INFO_GLOBAL_SELECTOR_DROPDOWN_CLASS} .bai-bai-wi-global-selector-search-clear:hover {
+        background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent) !important;
+        opacity: 1 !important;
+    }
 }
 
 .bai-bai-wi-global-selector-options {
