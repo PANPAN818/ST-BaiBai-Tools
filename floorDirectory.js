@@ -1,4 +1,4 @@
-// 楼层查找 (Floor Directory)
+// 楼层管理器 (Floor Directory)
 // 在酒馆 #extensionsMenu 注入一个按钮，点开后弹出"楼栋目录"窗口：
 //   - 命令栏输入纯数字 → 定位到该楼层
 //   - 输入其它文字 → 关键词搜索楼层
@@ -273,7 +273,7 @@ export function installFloorDirectory() {
         icon.className = 'fa-solid fa-building extensionsMenuExtensionButton';
 
         const label = document.createElement('span');
-        label.textContent = '楼层查找';
+        label.textContent = '楼层管理器';
 
         button.append(icon, label);
         container.appendChild(button);
@@ -320,7 +320,7 @@ function openFloorDirectoryDialog() {
 
     const title = document.createElement('div');
     title.className = 'bai-bai-floor-title';
-    title.textContent = '楼层查找';
+    title.textContent = '楼层管理器';
 
     const count = document.createElement('div');
     count.className = 'bai-bai-floor-count';
@@ -352,9 +352,7 @@ function openFloorDirectoryDialog() {
     clearButton.className = 'bai-bai-floor-clear';
     clearButton.setAttribute('aria-label', '清空');
     clearButton.innerHTML = '<i class="fa-solid fa-xmark"></i>';
-    clearButton.hidden = true;
-
-    bar.append(barIcon, input, clearButton);
+    clearButton.disabled = true;
 
     // ---- 控制行：提示 + 筛选 ----
     const controls = document.createElement('div');
@@ -394,14 +392,15 @@ function openFloorDirectoryDialog() {
     }
 
     // 移动端专用关闭按钮：与顶部那颗共用 close()，仅在窄屏显示（见样式 .bai-bai-floor-mobile-only）。
-    // 顶部关闭键挪不出 head（它嵌在标题栏里），所以这里另放一颗到底部操作行，桌面端隐藏。
+    // 作为 dialog 的独立移动端按钮，移动端排在搜索框右侧；桌面端隐藏。
     const mobileClose = document.createElement('button');
     mobileClose.type = 'button';
     mobileClose.className = 'bai-bai-floor-close bai-bai-floor-mobile-only';
     mobileClose.setAttribute('aria-label', '关闭');
     mobileClose.innerHTML = '<i class="fa-solid fa-xmark"></i>';
 
-    controls.append(filterBar, mobileClose);
+    bar.append(barIcon, input, clearButton);
+    controls.append(filterBar);
 
     // ---- 列表 ----
     const list = document.createElement('div');
@@ -411,7 +410,15 @@ function openFloorDirectoryDialog() {
     const pager = document.createElement('div');
     pager.className = 'bai-bai-floor-pager';
 
-    dialog.append(head, bar, controls, list, pager);
+    const mobileTopRow = document.createElement('div');
+    mobileTopRow.className = 'bai-bai-floor-mobile-top-row';
+    mobileTopRow.append(controls, pager);
+
+    const mobileBottomRow = document.createElement('div');
+    mobileBottomRow.className = 'bai-bai-floor-mobile-bottom-row';
+    mobileBottomRow.append(bar, mobileClose);
+
+    dialog.append(head, mobileBottomRow, mobileTopRow, list);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
 
@@ -437,8 +444,16 @@ function openFloorDirectoryDialog() {
     document.addEventListener('keydown', handleKeydown, true);
 
     // ---- 渲染逻辑 ----
-    // entries：当前结果集（已排序）；page：1 起页码；keyword：高亮词；filter：all/bot/user。
-    const renderState = { expanded: new Set(), entries: [], keyword: '', page: 1, filter: 'all' };
+    // entries：当前结果集（已排序）；page：1 起显示页码；keyword：高亮词；filter：all/bot/user。
+    // reversePageOrder 只用于移动端浏览/关键词模式：显示第 1 页时实际切到结果集末尾。
+    const renderState = {
+        expanded: new Set(),
+        entries: [],
+        keyword: '',
+        page: 1,
+        filter: 'all',
+        reversePageOrder: false,
+    };
 
     const renderEmpty = message => {
         list.innerHTML = '';
@@ -464,7 +479,10 @@ function openFloorDirectoryDialog() {
 
         const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
         renderState.page = Math.min(Math.max(1, renderState.page), totalPages);
-        const start = (renderState.page - 1) * PAGE_SIZE;
+        const slicePage = renderState.reversePageOrder
+            ? totalPages - renderState.page + 1
+            : renderState.page;
+        const start = (slicePage - 1) * PAGE_SIZE;
         const pageEntries = entries.slice(start, start + PAGE_SIZE);
 
         // 整块替换：旧行（含已展开的编辑器、事件监听）随 innerHTML 清空被回收。
@@ -518,10 +536,11 @@ function openFloorDirectoryDialog() {
     };
 
     // 设置结果集并从指定页开始渲染。
-    const showEntries = (entries, keyword, page = 1) => {
+    const showEntries = (entries, keyword, page = 1, options = {}) => {
         renderState.entries = entries;
         renderState.keyword = keyword;
         renderState.page = page;
+        renderState.reversePageOrder = Boolean(options.reversePageOrder);
         renderPage();
     };
 
@@ -587,12 +606,14 @@ function openFloorDirectoryDialog() {
         body.append(detail, actions);
 
         const renderView = () => {
+            detail.classList.remove('bai-bai-floor-detail-editing');
             detail.innerHTML = renderMessageHtml(ctx, message, index);
             actions.innerHTML = '';
             actions.appendChild(editButton);
         };
 
         const enterEdit = () => {
+            detail.classList.add('bai-bai-floor-detail-editing');
             const textarea = document.createElement('textarea');
             textarea.className = 'bai-bai-floor-editor';
             textarea.value = typeof message?.mes === 'string' ? message.mes : '';
@@ -723,13 +744,12 @@ function openFloorDirectoryDialog() {
         count.textContent = `共 ${freshChat.length} 层`;
 
         // 列表展示了一组（已按筛选收集、index 升序）楼层时，决定最终方向并落到合适的页：
-        //   移动端正序（旧在上、最新在底，贴合聊天滚动方向）→ 打开即落到最后一页并滚到底；
+        //   移动端正序（旧在上、最新在底，贴合聊天滚动方向）→ 显示第 1 页，实际切到末尾并滚到底；
         //   桌面端倒序（最新在上）→ 停在第 1 页。
         const showBrowse = (collected, keyword) => {
-            const entries = isMobileViewport() ? collected : collected.slice().reverse();
             const mobile = isMobileViewport();
-            const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
-            showEntries(entries, keyword, mobile ? totalPages : 1);
+            const entries = mobile ? collected : collected.slice().reverse();
+            showEntries(entries, keyword, 1, { reversePageOrder: mobile });
             if (mobile && entries.length) {
                 requestAnimationFrame(() => {
                     list.scrollTop = list.scrollHeight;
@@ -820,7 +840,7 @@ function openFloorDirectoryDialog() {
     };
 
     const syncClearButton = () => {
-        clearButton.hidden = input.value.length === 0;
+        clearButton.disabled = input.value.length === 0;
     };
 
     const debouncedApply = debounce(apply, 180);
@@ -838,7 +858,10 @@ function openFloorDirectoryDialog() {
         input.value = '';
         syncClearButton();
         apply('');
-        input.focus();
+        const isCoarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches;
+        if (!isCoarsePointer) {
+            input.focus({ preventScroll: true });
+        }
     });
 
     // 初始：展示全部楼层
@@ -955,6 +978,18 @@ function getStyleCss() {
     display: none;
 }
 
+.${OVERLAY_CLASS} .bai-bai-floor-mobile-top-row,
+.${OVERLAY_CLASS} .bai-bai-floor-mobile-bottom-row {
+    display: contents;
+}
+
+.${OVERLAY_CLASS} .bai-bai-floor-head { order: 0; }
+.${OVERLAY_CLASS} .bai-bai-floor-bar { order: 1; }
+.${OVERLAY_CLASS} .bai-bai-floor-controls { order: 2; }
+.${OVERLAY_CLASS} .bai-bai-floor-list { order: 3; }
+.${OVERLAY_CLASS} .bai-bai-floor-pager { order: 4; }
+.${OVERLAY_CLASS} .bai-bai-floor-mobile-bottom-row > .bai-bai-floor-mobile-only { order: 5; }
+
 .${OVERLAY_CLASS} .bai-bai-floor-bar {
     display: flex;
     align-items: center;
@@ -1037,8 +1072,11 @@ function getStyleCss() {
     background: rgba(127, 127, 127, 0.18);
 }
 
-.${OVERLAY_CLASS} .bai-bai-floor-clear[hidden] {
-    display: none;
+.${OVERLAY_CLASS} .bai-bai-floor-clear:disabled,
+.${OVERLAY_CLASS} .bai-bai-floor-clear:disabled:hover {
+    opacity: 0.35;
+    cursor: default;
+    background: transparent;
 }
 
 .${OVERLAY_CLASS} .bai-bai-floor-controls {
@@ -1056,7 +1094,7 @@ function getStyleCss() {
 /* 分段控件：一条浅色轨道，内嵌可滑动的圆角分段，激活段浮起为强调色胶囊 */
 .${OVERLAY_CLASS} .bai-bai-floor-filter {
     flex: 0 0 auto;
-    /* 把筛选钉在最右侧（左侧留空，移动端关闭键紧随其后靠右）。 */
+    /* 桌面端把筛选钉在最右侧；移动端会在媒体查询里改成左对齐。 */
     margin-left: auto;
     display: inline-flex;
     gap: 2px;
@@ -1255,6 +1293,11 @@ function getStyleCss() {
     overflow-wrap: anywhere;
 }
 
+.${OVERLAY_CLASS} .bai-bai-floor-detail-editing {
+    max-height: none;
+    overflow: hidden;
+}
+
 .${OVERLAY_CLASS} .bai-bai-floor-detail img {
     max-width: 100%;
     height: auto;
@@ -1273,6 +1316,7 @@ function getStyleCss() {
     font-family: inherit;
     font-size: 0.9rem;
     line-height: 1.6;
+    overflow-y: auto;
 }
 
 .${OVERLAY_CLASS} .bai-bai-floor-actions {
@@ -1397,13 +1441,35 @@ function getStyleCss() {
     }
 
     /* 移动端贴底显示，操作区下移到底部更易单手触达：
-       用 flex order 重排 dialog 直接子级 —— 标题 → 列表 → 分页 → 筛选行 → 搜索框。
-       顶部那颗关闭键随 head 留在顶部不便够到，改隐藏它、显示底部操作行里的 .bai-bai-floor-mobile-only 关闭键。 */
-    .${OVERLAY_CLASS} .bai-bai-floor-head { order: 0; }
-    .${OVERLAY_CLASS} .bai-bai-floor-list { order: 1; }
-    .${OVERLAY_CLASS} .bai-bai-floor-pager { order: 2; }
-    .${OVERLAY_CLASS} .bai-bai-floor-controls { order: 3; }
-    .${OVERLAY_CLASS} .bai-bai-floor-bar { order: 4; }
+       标题 → 列表 → 搜索/关闭 → 筛选/分页。 */
+    .${OVERLAY_CLASS} .bai-bai-floor-head {
+        order: 0;
+    }
+    .${OVERLAY_CLASS} .bai-bai-floor-list {
+        order: 1;
+        min-height: 0;
+    }
+    .${OVERLAY_CLASS} .bai-bai-floor-mobile-top-row {
+        order: 3;
+        flex: 0 0 auto;
+        width: 100%;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+    }
+    .${OVERLAY_CLASS} .bai-bai-floor-mobile-bottom-row {
+        order: 2;
+        flex: 0 0 auto;
+        width: 100%;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 16px 0;
+        border-top: 1px solid var(--SmartThemeBorderColor);
+    }
 
     /* 顶部关闭键移动端隐藏，由底部操作行的关闭键代替。 */
     .${OVERLAY_CLASS} .bai-bai-floor-head .bai-bai-floor-close {
@@ -1413,22 +1479,46 @@ function getStyleCss() {
         display: inline-flex;
     }
 
-    /* 底部操作组的分隔线与间距：筛选行作为底部第一块，与列表之间画一条分隔线。
-       搜索框原本是顶部首元素带 14px 上边距，移到底部后改成贴着筛选行、留出底部安全间距。 */
+    /* 底部最后一行：左侧身份筛选，右侧分页。 */
     .${OVERLAY_CLASS} .bai-bai-floor-controls {
-        margin: 0 16px;
-        padding: 10px 0;
-        border-top: 1px solid var(--SmartThemeBorderColor);
+        margin: 0;
+        padding: 10px 0 10px 16px;
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        min-width: 0;
     }
-    .${OVERLAY_CLASS} .bai-bai-floor-bar {
-        margin: 0 16px 14px;
+    .${OVERLAY_CLASS} .bai-bai-floor-filter {
+        margin-left: 0;
     }
 
-    /* 分页条移动端紧贴列表（同属内容区），交由下方筛选行的分隔线统一分割，
-       自身不再画顶部分隔线，避免与筛选行的 border-top 出现双线。 */
+    .${OVERLAY_CLASS} .bai-bai-floor-pager {
+        flex: 0 0 auto;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 0;
+    }
     .${OVERLAY_CLASS} .bai-bai-floor-pager:not(:empty) {
-        padding: 8px 16px 4px;
+        padding: 8px 16px 8px 0;
         border-top: none;
+    }
+
+    /* 底部上一行：搜索框占满剩余宽度，关闭按钮固定在右侧。 */
+    .${OVERLAY_CLASS} .bai-bai-floor-bar {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 36px;
+        margin: 0;
+        padding: 0 10px;
+        border-radius: 8px;
+    }
+    .${OVERLAY_CLASS} .bai-bai-floor-input {
+        font-size: 0.9rem;
+    }
+    .${OVERLAY_CLASS} .bai-bai-floor-mobile-bottom-row > .bai-bai-floor-mobile-only {
+        flex: 0 0 auto;
+        width: 36px;
+        height: 36px;
+        margin: 0;
     }
 }
 
