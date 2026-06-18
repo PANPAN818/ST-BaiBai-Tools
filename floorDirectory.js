@@ -607,17 +607,28 @@ function openFloorDirectoryDialog() {
 
         const renderView = () => {
             detail.classList.remove('bai-bai-floor-detail-editing');
+            detail.style.height = '';
             detail.innerHTML = renderMessageHtml(ctx, message, index);
             actions.innerHTML = '';
             actions.appendChild(editButton);
         };
 
         const enterEdit = () => {
+            const detailRect = detail.getBoundingClientRect();
+            const detailStyle = getComputedStyle(detail);
+            const verticalInset = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth']
+                .reduce((sum, key) => sum + (parseFloat(detailStyle[key]) || 0), 0);
+            const editorHeight = Math.max(0, Math.floor(detailRect.height - verticalInset));
+
             detail.classList.add('bai-bai-floor-detail-editing');
+            detail.style.height = `${Math.ceil(detailRect.height)}px`;
             const textarea = document.createElement('textarea');
             textarea.className = 'bai-bai-floor-editor';
             textarea.value = typeof message?.mes === 'string' ? message.mes : '';
             textarea.spellcheck = false;
+            textarea.style.minHeight = '0';
+            textarea.style.height = `${editorHeight}px`;
+            textarea.style.maxHeight = `${editorHeight}px`;
 
             const save = document.createElement('button');
             save.type = 'button';
@@ -634,17 +645,11 @@ function openFloorDirectoryDialog() {
             actions.innerHTML = '';
             actions.append(cancel, save);
 
-            const autosize = () => {
-                textarea.style.height = 'auto';
-                textarea.style.height = `${Math.min(textarea.scrollHeight, Math.round(window.innerHeight * 0.5))}px`;
-            };
-            textarea.addEventListener('input', autosize);
             requestAnimationFrame(() => {
-                autosize();
                 // 移动端不自动聚焦：否则进入编辑就弹软键盘。需要时用户自己点输入框。
                 const isCoarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches;
                 if (!isCoarsePointer) {
-                    textarea.focus();
+                    textarea.focus({ preventScroll: true });
                 }
             });
 
@@ -1280,6 +1285,7 @@ function getStyleCss() {
 }
 
 .${OVERLAY_CLASS} .bai-bai-floor-detail {
+    box-sizing: border-box;
     margin-top: 8px;
     padding: 10px 12px;
     font-size: 0.9rem;
