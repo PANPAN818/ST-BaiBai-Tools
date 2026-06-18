@@ -228,6 +228,47 @@ async function saveFloorEdit(ctx, index, newText) {
     await saveChat();
 }
 
+async function confirmFloorDelete(ctx, index, deleteCount) {
+    const message = `将删除第 ${index} 层及之后的楼层，删除后无法撤销。确定继续吗？`;
+    if (typeof ctx?.callGenericPopup === 'function' && ctx?.POPUP_TYPE && 'CONFIRM' in ctx.POPUP_TYPE) {
+        return Boolean(await ctx.callGenericPopup(message, ctx.POPUP_TYPE.CONFIRM));
+    }
+    return Boolean(globalThis.confirm?.(message));
+}
+
+async function deleteFloorRangeWithSlashCommand(ctx, index) {
+    const chat = getChatArray(ctx);
+    if (!chat[index]) {
+        throw new Error('楼层不存在');
+    }
+
+    const deleteCount = chat.length - index;
+    if (deleteCount < 1) {
+        return 0;
+    }
+
+    const confirmed = await confirmFloorDelete(ctx, index, deleteCount);
+    if (!confirmed) {
+        return 0;
+    }
+
+    const executeSlashCommandsWithOptions = ctx?.executeSlashCommandsWithOptions;
+    if (typeof executeSlashCommandsWithOptions !== 'function') {
+        throw new Error('无法删除：当前酒馆版本未暴露斜杠命令执行接口');
+    }
+
+    const result = await executeSlashCommandsWithOptions(`/del ${deleteCount}`, {
+        handleExecutionErrors: true,
+        source: 'floor-directory',
+    });
+
+    if (result?.isError) {
+        throw new Error(result.errorMessage || '斜杠删除命令执行失败');
+    }
+
+    return deleteCount;
+}
+
 // ---------------------------------------------------------------------------
 // 菜单按钮注入
 // ---------------------------------------------------------------------------
@@ -618,6 +659,10 @@ function openFloorDirectoryDialog() {
         editButton.type = 'button';
         editButton.className = 'bai-bai-floor-action';
         editButton.innerHTML = '<i class="fa-solid fa-pen-to-square"></i><span>编辑</span>';
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'bai-bai-floor-action bai-bai-floor-action-danger';
+        deleteButton.innerHTML = '<i class="fa-solid fa-trash-can"></i><span>删除</span>';
 
         body.append(detail, actions);
 
@@ -626,7 +671,7 @@ function openFloorDirectoryDialog() {
             detail.style.height = '';
             detail.innerHTML = renderMessageHtml(ctx, message, index);
             actions.innerHTML = '';
-            actions.appendChild(editButton);
+            actions.append(deleteButton, editButton);
         };
 
         const enterEdit = () => {
@@ -705,6 +750,33 @@ function openFloorDirectoryDialog() {
         };
 
         editButton.addEventListener('click', enterEdit);
+        deleteButton.addEventListener('click', async () => {
+            const freshCtx = getStContext();
+            if (!freshCtx) {
+                toastError('无法读取聊天上下文，删除失败');
+                return;
+            }
+
+            editButton.disabled = true;
+            deleteButton.disabled = true;
+            const previousHtml = deleteButton.innerHTML;
+            deleteButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>删除中</span>';
+            try {
+                const deletedCount = await deleteFloorRangeWithSlashCommand(freshCtx, index);
+                if (deletedCount > 0) {
+                    renderState.expanded = new Set([...renderState.expanded].filter(id => id < index));
+                    toastSuccess(`已删除第 ${index} 层及之后 ${deletedCount} 层`);
+                    apply(input.value);
+                }
+            } catch (error) {
+                console.error(`${LOG_PREFIX} delete floor range failed`, error);
+                toastError(`删除失败：${error?.message ?? error}`);
+            } finally {
+                editButton.disabled = false;
+                deleteButton.disabled = false;
+                deleteButton.innerHTML = previousHtml;
+            }
+        });
 
         if (renderState.expanded.has(index)) {
             row.classList.add('bai-bai-floor-row-open');
@@ -1407,6 +1479,15 @@ function getStyleCss() {
 
 .${OVERLAY_CLASS} .bai-bai-floor-action-primary:hover {
     background: color-mix(in srgb, var(--SmartThemeQuoteColor) 14%, transparent);
+}
+
+.${OVERLAY_CLASS} .bai-bai-floor-action-danger {
+    color: #d85c5c;
+    border-color: #d85c5c;
+}
+
+.${OVERLAY_CLASS} .bai-bai-floor-action-danger:hover {
+    background: rgba(216, 92, 92, 0.14);
 }
 
 .${OVERLAY_CLASS} .bai-bai-floor-pager {
