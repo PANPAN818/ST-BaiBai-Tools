@@ -119,6 +119,12 @@ function buildSnippet(plainText, keyword) {
     return `${prefix}${plainText.slice(start, end)}${suffix}`;
 }
 
+// 是否处于移动端窄屏布局：与样式里的 @media (max-width: 600px) 断点保持一致，
+// 用于决定楼层排序方向（移动端正序：旧楼在上、最新在底）与默认翻到的页。
+function isMobileViewport() {
+    return Boolean(window.matchMedia?.('(max-width: 600px)')?.matches);
+}
+
 // ---------------------------------------------------------------------------
 // 运行时取酒馆上下文
 // ---------------------------------------------------------------------------
@@ -354,10 +360,6 @@ function openFloorDirectoryDialog() {
     const controls = document.createElement('div');
     controls.className = 'bai-bai-floor-controls';
 
-    const hint = document.createElement('div');
-    hint.className = 'bai-bai-floor-hint';
-    hint.textContent = '数字 = 定位楼层 · 文字 = 关键词搜索';
-
     const filterBar = document.createElement('div');
     filterBar.className = 'bai-bai-floor-filter';
     filterBar.setAttribute('role', 'group');
@@ -391,7 +393,15 @@ function openFloorDirectoryDialog() {
         filterBar.appendChild(btn);
     }
 
-    controls.append(hint, filterBar);
+    // 移动端专用关闭按钮：与顶部那颗共用 close()，仅在窄屏显示（见样式 .bai-bai-floor-mobile-only）。
+    // 顶部关闭键挪不出 head（它嵌在标题栏里），所以这里另放一颗到底部操作行，桌面端隐藏。
+    const mobileClose = document.createElement('button');
+    mobileClose.type = 'button';
+    mobileClose.className = 'bai-bai-floor-close bai-bai-floor-mobile-only';
+    mobileClose.setAttribute('aria-label', '关闭');
+    mobileClose.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+
+    controls.append(filterBar, mobileClose);
 
     // ---- 列表 ----
     const list = document.createElement('div');
@@ -418,6 +428,7 @@ function openFloorDirectoryDialog() {
         }
     };
     closeButton.addEventListener('click', close);
+    mobileClose.addEventListener('click', close);
     overlay.addEventListener('mousedown', event => {
         if (event.target === overlay) {
             close();
@@ -461,7 +472,8 @@ function openFloorDirectoryDialog() {
         list.scrollTop = 0;
         const fragment = document.createDocumentFragment();
         for (const entry of pageEntries) {
-            fragment.appendChild(buildRow(entry, keyword));
+            // 分节标题行（数字模式下分隔「定位楼层」与「关键词命中」），其余为普通楼层行。
+            fragment.appendChild(entry?.type === 'header' ? buildHeader(entry) : buildRow(entry, keyword));
         }
         list.appendChild(fragment);
 
@@ -511,6 +523,14 @@ function openFloorDirectoryDialog() {
         renderState.keyword = keyword;
         renderState.page = page;
         renderPage();
+    };
+
+    // 分节标题行：用于数字模式下分隔「定位到的楼层」与「文本里含该数字的楼层」两段结果。
+    const buildHeader = entry => {
+        const header = document.createElement('div');
+        header.className = 'bai-bai-floor-section';
+        header.textContent = entry.label;
+        return header;
     };
 
     const buildRow = (entry, keyword) => {
@@ -702,23 +722,65 @@ function openFloorDirectoryDialog() {
         }
         count.textContent = `共 ${freshChat.length} 层`;
 
-        // 定位模式：纯数字
+        // 列表展示了一组（已按筛选收集、index 升序）楼层时，决定最终方向并落到合适的页：
+        //   移动端正序（旧在上、最新在底，贴合聊天滚动方向）→ 打开即落到最后一页并滚到底；
+        //   桌面端倒序（最新在上）→ 停在第 1 页。
+        const showBrowse = (collected, keyword) => {
+            const entries = isMobileViewport() ? collected : collected.slice().reverse();
+            const mobile = isMobileViewport();
+            const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+            showEntries(entries, keyword, mobile ? totalPages : 1);
+            if (mobile && entries.length) {
+                requestAnimationFrame(() => {
+                    list.scrollTop = list.scrollHeight;
+                });
+            }
+        };
+
+        // 数字模式：既定位到该楼层号（置顶展开），又把「文本里含该数字」的楼层作为搜索结果接在下面。
         if (/^\d+$/.test(value)) {
             const target = Number(value);
-            if (target < 0 || target >= freshChat.length) {
-                renderEmpty(`楼层号超出范围，本聊天共 ${freshChat.length} 层（0 ~ ${freshChat.length - 1}）`);
+            const inRange = target >= 0 && target < freshChat.length;
+
+            // 收集文本命中该数字的楼层（叠加筛选；排除已定位的目标楼，避免重复）。
+            const lowerKeyword = value.toLowerCase();
+            const matches = [];
+            for (let index = 0; index < freshChat.length; index += 1) {
+                if (inRange && index === target) {
+                    continue;
+                }
+                const message = freshChat[index];
+                if (!passesFilter(message)) {
+                    continue;
+                }
+                const plainText = stripTags(message?.mes ?? '');
+                if (plainText.toLowerCase().includes(lowerKeyword)) {
+                    matches.push({ index, message, plainText });
+                }
+            }
+            const orderedMatches = isMobileViewport() ? matches : matches.slice().reverse();
+
+            // 复合视图始终顶部锚定（定位楼层在最上），与端无关。
+            const entries = [];
+            if (inRange) {
+                renderState.expanded = new Set([target]);
+                const targetMsg = freshChat[target];
+                entries.push({ type: 'header', label: `定位 · 楼层 #${target}` });
+                entries.push({ index: target, message: targetMsg, plainText: stripTags(targetMsg?.mes ?? '') });
+            } else {
+                renderState.expanded = new Set();
+            }
+            if (orderedMatches.length) {
+                entries.push({ type: 'header', label: `文本包含「${value}」的楼层（${orderedMatches.length}）` });
+                entries.push(...orderedMatches);
+            }
+
+            if (!entries.length) {
+                renderEmpty(`楼层号 ${value} 超出范围（共 ${freshChat.length} 层，0 ~ ${freshChat.length - 1}），且没有楼层文本包含「${value}」`);
                 return;
             }
-            // 全部楼层（最新在上）里定位到目标楼，跳到它所在页并展开。
-            renderState.expanded = new Set([target]);
-            const entries = freshChat.map((message, index) => ({
-                index,
-                message,
-                plainText: stripTags(message?.mes ?? ''),
-            })).reverse();
-            const position = entries.findIndex(entry => entry.index === target);
-            const page = position >= 0 ? Math.floor(position / PAGE_SIZE) + 1 : 1;
-            showEntries(entries, '', page);
+
+            showEntries(entries, value, 1);
             requestAnimationFrame(() => {
                 list.querySelector('.bai-bai-floor-row-open')?.scrollIntoView({ block: 'nearest' });
             });
@@ -727,24 +789,23 @@ function openFloorDirectoryDialog() {
 
         const keyword = value;
 
-        // 默认（空输入）：展示（按筛选）全部楼层，最新在上。
+        // 默认（空输入）：展示（按筛选）全部楼层。
         if (!keyword) {
-            const entries = [];
+            const collected = [];
             for (let index = 0; index < freshChat.length; index += 1) {
                 const message = freshChat[index];
                 if (!passesFilter(message)) {
                     continue;
                 }
-                entries.push({ index, message, plainText: stripTags(message?.mes ?? '') });
+                collected.push({ index, message, plainText: stripTags(message?.mes ?? '') });
             }
-            entries.reverse();
-            showEntries(entries, '');
+            showBrowse(collected, '');
             return;
         }
 
         // 关键词搜索模式（叠加筛选）
         const lowerKeyword = keyword.toLowerCase();
-        const entries = [];
+        const collected = [];
         for (let index = 0; index < freshChat.length; index += 1) {
             const message = freshChat[index];
             if (!passesFilter(message)) {
@@ -752,11 +813,10 @@ function openFloorDirectoryDialog() {
             }
             const plainText = stripTags(message?.mes ?? '');
             if (plainText.toLowerCase().includes(lowerKeyword)) {
-                entries.push({ index, message, plainText });
+                collected.push({ index, message, plainText });
             }
         }
-        entries.reverse();
-        showEntries(entries, keyword);
+        showBrowse(collected, keyword);
     };
 
     const syncClearButton = () => {
@@ -890,6 +950,11 @@ function getStyleCss() {
     background: rgba(127, 127, 127, 0.12);
 }
 
+/* 仅移动端可见的元素（如底部操作行里的关闭键），桌面端隐藏。 */
+.${OVERLAY_CLASS} .bai-bai-floor-mobile-only {
+    display: none;
+}
+
 .${OVERLAY_CLASS} .bai-bai-floor-bar {
     display: flex;
     align-items: center;
@@ -988,18 +1053,10 @@ function getStyleCss() {
     margin: 8px 16px 10px;
 }
 
-.${OVERLAY_CLASS} .bai-bai-floor-hint {
-    flex: 1 1 auto;
-    min-width: 0;
-    font-size: 0.72rem;
-    color: var(--SmartThemeEmColor);
-    letter-spacing: 0.02em;
-}
-
 /* 分段控件：一条浅色轨道，内嵌可滑动的圆角分段，激活段浮起为强调色胶囊 */
 .${OVERLAY_CLASS} .bai-bai-floor-filter {
     flex: 0 0 auto;
-    /* 无论 hint 是否存在/换行，都把筛选钉在最右侧 */
+    /* 把筛选钉在最右侧（左侧留空，移动端关闭键紧随其后靠右）。 */
     margin-left: auto;
     display: inline-flex;
     gap: 2px;
@@ -1046,6 +1103,19 @@ function getStyleCss() {
     color: var(--SmartThemeEmColor);
     font-size: 0.88rem;
     line-height: 1.6;
+}
+
+/* 分节标题行：数字模式下分隔「定位楼层」与「文本命中」两段结果。 */
+.${OVERLAY_CLASS} .bai-bai-floor-section {
+    padding: 10px 6px 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--SmartThemeQuoteColor);
+}
+.${OVERLAY_CLASS} .bai-bai-floor-section + .bai-bai-floor-row {
+    border-top: none;
 }
 
 .${OVERLAY_CLASS} .bai-bai-floor-row {
@@ -1316,15 +1386,49 @@ function getStyleCss() {
     }
     .${OVERLAY_CLASS} .bai-bai-floor-dialog {
         width: 100%;
-        /* 用视口高度而非 height:100%，后者依赖祖先链有确定高度，
+        /* 移动端占满视口高度。用视口单位而非 height:100%，后者依赖祖先链有确定高度，
            在部分移动布局下会塌成 0（表现为窗口看不见）。 */
-        height: 70vh;
-        height: 70dvh;
-        max-height: 70vh;
-        max-height: 70dvh;
-        border-radius: 14px 14px 0 0;
+        height: 100vh;
+        height: 100dvh;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
         border: none;
+    }
+
+    /* 移动端贴底显示，操作区下移到底部更易单手触达：
+       用 flex order 重排 dialog 直接子级 —— 标题 → 列表 → 分页 → 筛选行 → 搜索框。
+       顶部那颗关闭键随 head 留在顶部不便够到，改隐藏它、显示底部操作行里的 .bai-bai-floor-mobile-only 关闭键。 */
+    .${OVERLAY_CLASS} .bai-bai-floor-head { order: 0; }
+    .${OVERLAY_CLASS} .bai-bai-floor-list { order: 1; }
+    .${OVERLAY_CLASS} .bai-bai-floor-pager { order: 2; }
+    .${OVERLAY_CLASS} .bai-bai-floor-controls { order: 3; }
+    .${OVERLAY_CLASS} .bai-bai-floor-bar { order: 4; }
+
+    /* 顶部关闭键移动端隐藏，由底部操作行的关闭键代替。 */
+    .${OVERLAY_CLASS} .bai-bai-floor-head .bai-bai-floor-close {
+        display: none;
+    }
+    .${OVERLAY_CLASS} .bai-bai-floor-mobile-only {
+        display: inline-flex;
+    }
+
+    /* 底部操作组的分隔线与间距：筛选行作为底部第一块，与列表之间画一条分隔线。
+       搜索框原本是顶部首元素带 14px 上边距，移到底部后改成贴着筛选行、留出底部安全间距。 */
+    .${OVERLAY_CLASS} .bai-bai-floor-controls {
+        margin: 0 16px;
+        padding: 10px 0;
         border-top: 1px solid var(--SmartThemeBorderColor);
+    }
+    .${OVERLAY_CLASS} .bai-bai-floor-bar {
+        margin: 0 16px 14px;
+    }
+
+    /* 分页条移动端紧贴列表（同属内容区），交由下方筛选行的分隔线统一分割，
+       自身不再画顶部分隔线，避免与筛选行的 border-top 出现双线。 */
+    .${OVERLAY_CLASS} .bai-bai-floor-pager:not(:empty) {
+        padding: 8px 16px 4px;
+        border-top: none;
     }
 }
 
