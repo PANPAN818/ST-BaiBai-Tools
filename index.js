@@ -370,6 +370,7 @@ const defaultSettings = {
     regexQuickOperationOptimizationEnabled: true,
     regexListGroups: {},
     chatDeleteEditFlowOptimizationEnabled: true,
+    messageEditBottomActionsEnabled: true,
     messageDoubleClickEditEnabled: false,
     messageTripleClickEditEnabled: true,
     messageCompletionSoundEnabled: false,
@@ -3595,6 +3596,7 @@ function applyFeatureSettings() {
     chatOptimizations.applyMessageCompletionScrollToMiddle();
     chatOptimizations.applyMobileAutoKeyboardSuppression();
     chatOptimizations.applyMobileMessageEditScrollGuard();
+    chatOptimizations.applyMessageEditBottomActions();
     chatOptimizations.applyMessageTripleClickEdit();
     chatOptimizations.applyMessageCompletionSound();
     applyBaibaokuLazyThemeLoadingOptimization();

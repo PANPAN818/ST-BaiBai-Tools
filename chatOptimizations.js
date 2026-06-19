@@ -18,9 +18,11 @@ import { timestampToMoment } from '../../../utils.js';
 const FAST_CHAT_SEARCH_FETCH_KEY = '__baiBaiToolkitFastChatSearchFetchPatched';
 const FAST_CHAT_LIST_SCROLL_STYLE_ID = 'bai_bai_toolkit_fast_chat_list_scroll_style';
 const LONG_CHAT_DOM_RENDER_STYLE_ID = 'bai_bai_toolkit_long_chat_dom_render_style';
+const MESSAGE_EDIT_BOTTOM_ACTIONS_STYLE_ID = 'bai_bai_toolkit_message_edit_bottom_actions_style';
 const CHAT_DELETE_EDIT_HANDLER_KEY = '__baiBaiToolkitChatDeleteEditHandler';
 const CHAT_DELETE_MESSAGE_DELETED_HANDLER_KEY = '__baiBaiToolkitChatDeleteMessageDeletedHandler';
 const CHAT_DELETE_GENERATION_ACTION_HANDLER_KEY = '__baiBaiToolkitChatDeleteGenerationActionHandler';
+const MESSAGE_EDIT_BOTTOM_ACTIONS_STATE_KEY = '__baiBaiToolkitMessageEditBottomActions';
 const WELCOME_RECENT_CHAT_DIRECT_OPEN_HANDLER_KEY = '__baiBaiToolkitWelcomeRecentChatDirectOpenHandler';
 const WELCOME_RECENT_CHAT_DIRECT_OPEN_CURRENT_HANDLER_KEY = '__baiBaiToolkitWelcomeRecentChatDirectOpenCurrentHandler';
 const MESSAGE_COMPLETION_SCROLL_HANDLER_KEY = '__baiBaiToolkitMessageCompletionScrollHandler';
@@ -65,6 +67,7 @@ const CHAT_MESSAGE_EDIT_SELECTOR = '#chat .mes_edit';
 const WELCOME_PANEL_SELECTOR = '#chat .welcomePanel';
 const WELCOME_RECENT_CHAT_SELECTOR = '#chat .welcomePanel .recentChat';
 const WELCOME_RECENT_CHAT_ACTION_SELECTOR = '.renameChat, .deleteChat, .pinChat, button, a, input, select, textarea';
+const MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS = 'bai-bai-toolkit-message-edit-bottom-actions';
 const MOBILE_MESSAGE_EDIT_SELECTOR = '#curEditTextarea, .reasoning_edit_textarea';
 const MOBILE_AUTO_KEYBOARD_TARGET_SELECTOR = '#curEditTextarea, #select_chat_search';
 const MOBILE_CHAT_ENTRY_KEYBOARD_TARGET_SELECTOR = '#send_textarea';
@@ -191,6 +194,14 @@ export function bindChatOptimizationSettings({ saveSettings } = {}) {
             settings.chatDeleteEditFlowOptimizationEnabled = Boolean($(this).prop('checked'));
             persistSettings();
             applyChatDeleteEditFlowOptimization();
+        });
+
+    $('#bai_bai_toolkit_message_edit_bottom_actions_enabled')
+        .prop('checked', settings.messageEditBottomActionsEnabled !== false)
+        .on('input', function () {
+            settings.messageEditBottomActionsEnabled = Boolean($(this).prop('checked'));
+            persistSettings();
+            applyMessageEditBottomActions();
         });
 
     initializeMessageCompletionSoundControls(persistSettings);
@@ -2219,6 +2230,201 @@ function applyChatDeleteEditFlowOptimization() {
     document.addEventListener('click', clickHandler, true);
     document.addEventListener('click', generationActionHandler, true);
     eventSource.on(event_types.MESSAGE_DELETED, messageDeletedHandler);
+}
+
+function applyMessageEditBottomActions() {
+    if (settings.messageEditBottomActionsEnabled === false) {
+        removeMessageEditBottomActions();
+        return;
+    }
+
+    installMessageEditBottomActions();
+    scheduleMessageEditBottomActionsUpdate();
+}
+
+function getMessageEditBottomActionsState() {
+    if (!extensionState[MESSAGE_EDIT_BOTTOM_ACTIONS_STATE_KEY] || typeof extensionState[MESSAGE_EDIT_BOTTOM_ACTIONS_STATE_KEY] !== 'object') {
+        extensionState[MESSAGE_EDIT_BOTTOM_ACTIONS_STATE_KEY] = {};
+    }
+
+    return extensionState[MESSAGE_EDIT_BOTTOM_ACTIONS_STATE_KEY];
+}
+
+function installMessageEditBottomActions() {
+    ensureMessageEditBottomActionsStyle();
+
+    const state = getMessageEditBottomActionsState();
+    const chat = document.querySelector('#chat');
+    if (!(chat instanceof HTMLElement) || typeof MutationObserver !== 'function') {
+        clearTimeout(state.retryTimer);
+        state.retryTimer = setTimeout(() => {
+            state.retryTimer = null;
+            applyMessageEditBottomActions();
+        }, 1000);
+        return;
+    }
+
+    if (state.observer && state.chatElement === chat) {
+        return;
+    }
+
+    state.observer?.disconnect();
+    state.chatElement = chat;
+    state.observer = new MutationObserver(() => {
+        scheduleMessageEditBottomActionsUpdate();
+    });
+    state.observer.observe(chat, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class'],
+    });
+}
+
+function removeMessageEditBottomActions() {
+    const state = getMessageEditBottomActionsState();
+    state.observer?.disconnect();
+    state.observer = null;
+    state.chatElement = null;
+    clearTimeout(state.retryTimer);
+    state.retryTimer = null;
+    if (state.updateFrame) {
+        cancelAnimationFrame(state.updateFrame);
+        state.updateFrame = 0;
+    }
+
+    document.getElementById(MESSAGE_EDIT_BOTTOM_ACTIONS_STYLE_ID)?.remove();
+    document.querySelectorAll(`#chat .${MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS}`).forEach(container => container.remove());
+}
+
+function scheduleMessageEditBottomActionsUpdate() {
+    const state = getMessageEditBottomActionsState();
+    if (state.updateFrame) {
+        return;
+    }
+
+    state.updateFrame = requestAnimationFrame(() => {
+        state.updateFrame = 0;
+        updateMessageEditBottomActions();
+    });
+}
+
+function updateMessageEditBottomActions() {
+    if (settings.messageEditBottomActionsEnabled === false) {
+        removeMessageEditBottomActions();
+        return;
+    }
+
+    installMessageEditBottomActions();
+
+    const chat = document.querySelector('#chat');
+    if (!(chat instanceof HTMLElement)) {
+        return;
+    }
+
+    const activeEditor = chat.querySelector('#curEditTextarea');
+    cleanupInactiveMessageEditBottomActions(activeEditor);
+
+    if (!(activeEditor instanceof HTMLElement)) {
+        return;
+    }
+
+    ensureMessageEditBottomActionsForEditor(activeEditor);
+}
+
+function cleanupInactiveMessageEditBottomActions(activeEditor) {
+    const activeMessage = activeEditor instanceof HTMLElement ? activeEditor.closest('.mes') : null;
+    document.querySelectorAll(`#chat .${MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS}`).forEach(container => {
+        if (container.closest('.mes') !== activeMessage) {
+            container.remove();
+        }
+    });
+}
+
+function ensureMessageEditBottomActionsForEditor(editor) {
+    const message = editor.closest('.mes');
+    const host = editor.parentElement;
+    if (!(message instanceof HTMLElement) || !(host instanceof HTMLElement)) {
+        return;
+    }
+
+    const topConfirm = message.querySelector('.mes_edit_buttons .mes_edit_done');
+    const topCancel = message.querySelector('.mes_edit_buttons .mes_edit_cancel');
+    if (!(topConfirm instanceof HTMLElement) || !(topCancel instanceof HTMLElement)) {
+        return;
+    }
+
+    const existingContainers = Array.from(message.querySelectorAll(`.${MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS}`));
+    let container = existingContainers.find(element => element.parentElement === host);
+    for (const element of existingContainers) {
+        if (element !== container) {
+            element.remove();
+        }
+    }
+
+    if (!(container instanceof HTMLElement)) {
+        container = document.createElement('div');
+        container.className = MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS;
+        container.dataset.baiBaiToolkit = 'message-edit-bottom-actions';
+    }
+
+    if (container.parentElement !== host || container.previousElementSibling !== editor) {
+        editor.insertAdjacentElement('afterend', container);
+    }
+
+    if (container.dataset.ready === 'true') {
+        return;
+    }
+
+    const bottomConfirm = cloneMessageEditBottomAction(topConfirm, 'bottom-confirm');
+    const bottomCancel = cloneMessageEditBottomAction(topCancel, 'bottom-cancel');
+    container.replaceChildren(bottomCancel, bottomConfirm);
+    container.dataset.ready = 'true';
+}
+
+function cloneMessageEditBottomAction(source, actionName) {
+    const clone = source.cloneNode(false);
+    clone.dataset.baiBaiToolkitBottomAction = actionName;
+    clone.removeAttribute('id');
+    return clone;
+}
+
+function ensureMessageEditBottomActionsStyle() {
+    let style = document.getElementById(MESSAGE_EDIT_BOTTOM_ACTIONS_STYLE_ID);
+    if (!style) {
+        style = document.createElement('style');
+        style.id = MESSAGE_EDIT_BOTTOM_ACTIONS_STYLE_ID;
+        document.head.append(style);
+    }
+
+    style.textContent = `
+#chat .${MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS} {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 8px;
+}
+
+#chat .${MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS} .menu_button {
+    flex: 0 0 auto;
+    opacity: 0.5;
+    padding: 0;
+    font-size: 1rem;
+    height: 2rem;
+    margin-top: 0;
+    margin-bottom: 0;
+    aspect-ratio: 1 / 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#chat .${MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS} .menu_button:hover {
+    opacity: 1;
+}
+`;
 }
 
 function applyMobileAutoKeyboardSuppression() {
@@ -5328,6 +5534,7 @@ export {
     applyLongChatDomRenderOptimization,
     applyMessageCompletionScrollToMiddle,
     applyMessageCompletionSound,
+    applyMessageEditBottomActions,
     applyMessageTripleClickEdit,
     applyMobileAutoKeyboardSuppression,
     applyMobileMessageEditScrollGuard,
