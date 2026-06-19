@@ -78,6 +78,7 @@ const MESSAGE_COMPLETION_SOUND_STORE = 'messageCompletionSounds';
 const MESSAGE_COMPLETION_SOUND_LOCAL_KEY = 'local';
 const MESSAGE_COMPLETION_SOUND_MAX_LOCAL_BYTES = 5 * 1024 * 1024;
 const MESSAGE_COMPLETION_SOUND_COOLDOWN_MS = 1000;
+const MESSAGE_COMPLETION_SOUND_KEEP_ALIVE_SRC = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA==';
 const BUILTIN_COMPLETION_SOUNDS = [
     { id: 'guoke-bell', label: '果壳铃', file: '果壳铃.mp3' },
     { id: 'stardew-fish', label: '星露谷 - 钓鱼上钩', file: '星露谷-钓鱼上钩.mp3' },
@@ -4055,6 +4056,18 @@ function initializeMessageCompletionSoundControls(persistSettings) {
             applyMessageCompletionSound();
         });
 
+    $('#bai_bai_toolkit_message_completion_sound_keep_alive_enabled')
+        .prop('checked', settings.messageCompletionSoundKeepAliveEnabled !== false)
+        .off('input.baiBaiToolkitMessageSound')
+        .on('input.baiBaiToolkitMessageSound', function () {
+            settings.messageCompletionSoundKeepAliveEnabled = Boolean($(this).prop('checked'));
+            persistSettings?.();
+            syncMessageCompletionSoundKeepAliveHandlers();
+            if (!isMessageCompletionSoundKeepAliveEnabled()) {
+                stopMessageCompletionSoundKeepAlive();
+            }
+        });
+
     $('#bai_bai_toolkit_message_completion_sound_source')
         .val(getMessageCompletionSoundSource())
         .off('change.baiBaiToolkitMessageSound')
@@ -4189,6 +4202,7 @@ function normalizeMessageCompletionSoundSettings() {
     settings.messageCompletionSoundLocalFileName = typeof settings.messageCompletionSoundLocalFileName === 'string'
         ? settings.messageCompletionSoundLocalFileName
         : '';
+    settings.messageCompletionSoundKeepAliveEnabled = settings.messageCompletionSoundKeepAliveEnabled !== false;
 }
 
 function populateMessageCompletionSoundBuiltinOptions() {
@@ -4206,6 +4220,8 @@ function updateMessageCompletionSoundControls() {
     const source = getMessageCompletionSoundSource();
     $('#bai_bai_toolkit_message_completion_sound_enabled')
         .prop('checked', Boolean(settings.messageCompletionSoundEnabled));
+    $('#bai_bai_toolkit_message_completion_sound_keep_alive_enabled')
+        .prop('checked', settings.messageCompletionSoundKeepAliveEnabled !== false);
     $('#bai_bai_toolkit_message_completion_sound_source').val(source);
     $('#bai_bai_toolkit_message_completion_sound_builtin_id').val(getMessageCompletionSoundBuiltin().id);
     $('#bai_bai_toolkit_message_completion_sound_url').val(settings.messageCompletionSoundUrl || '');
@@ -4266,6 +4282,7 @@ function getMessageCompletionSoundState() {
 function applyMessageCompletionSound() {
     if (settings.messageCompletionSoundEnabled) {
         installMessageCompletionSoundHandlers();
+        syncMessageCompletionSoundKeepAliveHandlers();
     } else {
         removeMessageCompletionSoundHandlers();
     }
@@ -4280,11 +4297,15 @@ function installMessageCompletionSoundHandlers() {
     const generationStartedHandler = () => {
         state.generationActive = true;
         state.generationStopped = false;
+        startMessageCompletionSoundKeepAlive().catch(error => {
+            console.debug(`${LOG_PREFIX} Failed to start message completion sound keep-alive`, error);
+        });
     };
     const generationStoppedHandler = () => {
         if (state.generationActive) {
             state.generationStopped = true;
         }
+        stopMessageCompletionSoundKeepAlive();
     };
     const generationEndedHandler = () => {
         const shouldPlay = state.generationActive && !state.generationStopped;
@@ -4292,11 +4313,14 @@ function installMessageCompletionSoundHandlers() {
         state.generationStopped = false;
 
         if (!shouldPlay) {
+            stopMessageCompletionSoundKeepAlive();
             return;
         }
 
         playSelectedMessageCompletionSound().catch(error => {
             console.debug(`${LOG_PREFIX} Failed to play message completion sound`, error);
+        }).finally(() => {
+            stopMessageCompletionSoundKeepAlive();
         });
     };
 
@@ -4304,6 +4328,7 @@ function installMessageCompletionSoundHandlers() {
     addMessageCompletionSoundEventHandler(event_types.GENERATION_STOPPED, generationStoppedHandler);
     addMessageCompletionSoundEventHandler(event_types.GENERATION_ENDED, generationEndedHandler);
     state.installed = true;
+    syncMessageCompletionSoundKeepAliveHandlers();
 }
 
 function addMessageCompletionSoundEventHandler(event, handler) {
@@ -4326,7 +4351,152 @@ function removeMessageCompletionSoundHandlers() {
     state.installed = false;
     state.generationActive = false;
     state.generationStopped = false;
+    removeMessageCompletionSoundKeepAliveHandlers();
+    stopMessageCompletionSoundKeepAlive();
     resetMessageCompletionSoundAudio();
+}
+
+function isMessageCompletionSoundKeepAliveEnabled() {
+    return Boolean(
+        settings.messageCompletionSoundEnabled
+        && settings.messageCompletionSoundKeepAliveEnabled !== false
+        && isMobile()
+    );
+}
+
+function syncMessageCompletionSoundKeepAliveHandlers() {
+    if (isMessageCompletionSoundKeepAliveEnabled()) {
+        installMessageCompletionSoundKeepAliveHandlers();
+        const state = getMessageCompletionSoundState();
+        if (state.generationActive && !state.generationStopped) {
+            startMessageCompletionSoundKeepAlive().catch(error => {
+                console.debug(`${LOG_PREFIX} Failed to start message completion sound keep-alive`, error);
+            });
+        }
+    } else {
+        removeMessageCompletionSoundKeepAliveHandlers();
+        stopMessageCompletionSoundKeepAlive();
+    }
+}
+
+function installMessageCompletionSoundKeepAliveHandlers() {
+    const state = getMessageCompletionSoundState();
+    if (state.keepAliveInteractionHandlersInstalled) {
+        return;
+    }
+
+    const unlockHandler = () => {
+        unlockMessageCompletionSoundKeepAlive().catch(error => {
+            console.debug(`${LOG_PREFIX} Failed to unlock message completion sound keep-alive`, error);
+        });
+    };
+    const passiveCaptureOptions = { capture: true, passive: true };
+    const keydownOptions = { capture: true };
+    state.keepAliveInteractionHandlers = [
+        { target: document, event: 'pointerdown', handler: unlockHandler, options: passiveCaptureOptions },
+        { target: document, event: 'touchstart', handler: unlockHandler, options: passiveCaptureOptions },
+        { target: document, event: 'click', handler: unlockHandler, options: passiveCaptureOptions },
+        { target: document, event: 'keydown', handler: unlockHandler, options: keydownOptions },
+    ];
+
+    for (const entry of state.keepAliveInteractionHandlers) {
+        entry.target.addEventListener(entry.event, entry.handler, entry.options);
+    }
+
+    state.keepAliveInteractionHandlersInstalled = true;
+}
+
+function removeMessageCompletionSoundKeepAliveHandlers() {
+    const state = getMessageCompletionSoundState();
+    for (const entry of state.keepAliveInteractionHandlers || []) {
+        entry.target.removeEventListener(entry.event, entry.handler, entry.options);
+    }
+
+    state.keepAliveInteractionHandlers = [];
+    state.keepAliveInteractionHandlersInstalled = false;
+    state.keepAliveUnlocking = false;
+}
+
+async function unlockMessageCompletionSoundKeepAlive() {
+    const state = getMessageCompletionSoundState();
+    if (!isMessageCompletionSoundKeepAliveEnabled() || state.keepAliveUnlocked || state.keepAliveUnlocking || state.keepAlivePlaying) {
+        return false;
+    }
+
+    state.keepAliveUnlocking = true;
+    try {
+        const audio = getMessageCompletionSoundKeepAliveAudio();
+        resetMessageCompletionSoundKeepAliveTime(audio);
+        await audio.play();
+        audio.pause();
+        resetMessageCompletionSoundKeepAliveTime(audio);
+        state.keepAliveUnlocked = true;
+        return true;
+    } finally {
+        state.keepAliveUnlocking = false;
+    }
+}
+
+async function startMessageCompletionSoundKeepAlive() {
+    const state = getMessageCompletionSoundState();
+    if (!isMessageCompletionSoundKeepAliveEnabled()) {
+        return false;
+    }
+
+    const audio = getMessageCompletionSoundKeepAliveAudio();
+    if (state.keepAlivePlaying && !audio.paused) {
+        return true;
+    }
+
+    state.keepAliveRequested = true;
+
+    try {
+        resetMessageCompletionSoundKeepAliveTime(audio);
+        await audio.play();
+        state.keepAlivePlaying = true;
+        state.keepAliveUnlocked = true;
+        return true;
+    } catch (error) {
+        state.keepAlivePlaying = false;
+        state.keepAliveLastErrorAt = Date.now();
+        setMessageCompletionSoundStatus('静音保活启动失败，浏览器可能限制了自动播放。', true);
+        throw error;
+    }
+}
+
+function stopMessageCompletionSoundKeepAlive() {
+    const state = getMessageCompletionSoundState();
+    const audio = state.keepAliveAudio;
+    if (audio instanceof HTMLAudioElement) {
+        audio.pause();
+        resetMessageCompletionSoundKeepAliveTime(audio);
+    }
+
+    state.keepAliveRequested = false;
+    state.keepAlivePlaying = false;
+}
+
+function resetMessageCompletionSoundKeepAliveTime(audio) {
+    try {
+        audio.currentTime = 0;
+    } catch {
+        // Some mobile browsers reject currentTime writes while media is not ready.
+    }
+}
+
+function getMessageCompletionSoundKeepAliveAudio() {
+    const state = getMessageCompletionSoundState();
+    if (!(state.keepAliveAudio instanceof HTMLAudioElement)) {
+        const audio = new Audio(MESSAGE_COMPLETION_SOUND_KEEP_ALIVE_SRC);
+        audio.loop = true;
+        audio.muted = false;
+        audio.volume = 1;
+        audio.preload = 'auto';
+        audio.setAttribute('playsinline', '');
+        state.keepAliveAudio = audio;
+    }
+
+    return state.keepAliveAudio;
 }
 
 async function playSelectedMessageCompletionSound({ preview = false } = {}) {

@@ -378,6 +378,7 @@ const defaultSettings = {
     messageCompletionSoundUrl: '',
     messageCompletionSoundVolume: 0.8,
     messageCompletionSoundLocalFileName: '',
+    messageCompletionSoundKeepAliveEnabled: true,
 };
 const legacySettingsKeys = [
     'textareaScrollOptimizationEnabled',
