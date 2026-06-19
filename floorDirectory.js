@@ -44,11 +44,24 @@ function escapeRegExp(value) {
     return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// 只给列表预览用：隐藏思维块，保留其它原始文本/标签。
+// 只给列表预览用：从楼层原始文本隐藏思维块，保留其它原始文本/标签。
 function stripThinkingBlocks(value) {
+    // return String(value ?? '')
+    //     .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gmi, '')
+    //     .replace(/<thinking\b[^>]*>[\s\S]*?<\/thinking>/gmi, '')
+    //     .trim();
+
     return String(value ?? '')
-        .replace(/<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?>/gmi, '')
+        .replace(/<think[ing]*>[\s\S]*?<\/think[ing]*>/gmi, '')
         .trim();
+}
+
+function buildPreviewText(message) {
+    return stripThinkingBlocks(typeof message?.mes === 'string' ? message.mes : '');
+}
+
+function renderPreviewTextHtml(value) {
+    return escapeHtml(value).replace(/\n/g, '<br>');
 }
 
 // 在转义后的纯文本上高亮命中词。先把 keyword 同样转义，确保与转义文本匹配。
@@ -607,10 +620,9 @@ function openFloorDirectoryDialog() {
     };
 
     const buildRow = (entry, keyword) => {
-        const { index, message } = entry;
-        const plainText = typeof entry.plainText === 'string'
-            ? entry.plainText
-            : stripThinkingBlocks(message?.mes ?? '');
+        const { index } = entry;
+        const message = chat[index] ?? entry.message;
+        const previewText = buildPreviewText(message);
         const isUser = Boolean(message?.is_user);
 
         const row = document.createElement('div');
@@ -643,7 +655,7 @@ function openFloorDirectoryDialog() {
 
         const snippet = document.createElement('div');
         snippet.className = 'bai-bai-floor-snippet';
-        snippet.innerHTML = highlightHtml(buildSnippet(plainText, keyword), keyword);
+        snippet.innerHTML = highlightHtml(buildSnippet(previewText, keyword), keyword);
 
         // 展开区：正文预览(.bai-bai-floor-detail) + 操作栏(.bai-bai-floor-actions)，
         // 进入编辑后正文换成 textarea + 保存/取消。
@@ -669,7 +681,7 @@ function openFloorDirectoryDialog() {
         const renderView = () => {
             detail.classList.remove('bai-bai-floor-detail-editing');
             detail.style.height = '';
-            detail.innerHTML = renderMessageHtml(ctx, message, index);
+            detail.innerHTML = renderPreviewTextHtml(previewText);
             actions.innerHTML = '';
             actions.append(deleteButton, editButton);
         };
@@ -728,7 +740,6 @@ function openFloorDirectoryDialog() {
                 save.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>保存中</span>';
                 try {
                     await saveFloorEdit(freshCtx, index, textarea.value);
-                    entry.plainText = stripThinkingBlocks(textarea.value);
                     toastSuccess(`已保存第 ${index} 层`);
                     renderView();
                 } catch (error) {
@@ -829,7 +840,6 @@ function openFloorDirectoryDialog() {
         return {
             index,
             message,
-            plainText: stripThinkingBlocks(message?.mes ?? ''),
         };
     };
 
@@ -851,15 +861,15 @@ function openFloorDirectoryDialog() {
 
     const apply = rawValue => {
         const value = String(rawValue ?? '').trim();
-        const freshCtx = getStContext();
-        const freshChat = getChatArray(freshCtx);
+        const openedCtx = ctx;
+        const openedChat = chat;
 
-        if (!freshCtx || !freshChat.length) {
+        if (!openedCtx || !openedChat.length) {
             count.textContent = '暂无楼层';
             renderEmpty('当前没有打开的聊天');
             return;
         }
-        count.textContent = `共 ${freshChat.length} 层`;
+        count.textContent = `共 ${openedChat.length} 层`;
 
         // 列表展示了一组（已按筛选收集、index 升序）楼层时，决定最终方向并落到合适的页：
         //   移动端正序（旧在上、最新在底，贴合聊天滚动方向）→ 显示第 1 页，实际切到末尾并滚到底；
@@ -873,7 +883,7 @@ function openFloorDirectoryDialog() {
                 for (let offset = start; offset < end; offset += 1) {
                     const sourceOffset = mobile ? offset : totalItems - 1 - offset;
                     const index = messageIndexes[sourceOffset];
-                    pageEntries.push(buildMessageEntry(freshChat, index));
+                    pageEntries.push(buildMessageEntry(openedChat, index));
                 }
                 return pageEntries;
             };
@@ -889,16 +899,16 @@ function openFloorDirectoryDialog() {
         // 数字模式：既定位到该楼层号（置顶展开），又把「文本里含该数字」的楼层作为搜索结果接在下面。
         if (/^\d+$/.test(value)) {
             const target = Number(value);
-            const inRange = target >= 0 && target < freshChat.length;
+            const inRange = target >= 0 && target < openedChat.length;
 
             // 收集文本命中该数字的楼层（叠加筛选；排除已定位的目标楼，避免重复）。
             const lowerKeyword = value.toLowerCase();
             const matches = [];
-            for (let index = 0; index < freshChat.length; index += 1) {
+            for (let index = 0; index < openedChat.length; index += 1) {
                 if (inRange && index === target) {
                     continue;
                 }
-                const message = freshChat[index];
+                const message = openedChat[index];
                 if (!passesFilter(message)) {
                     continue;
                 }
@@ -912,21 +922,20 @@ function openFloorDirectoryDialog() {
             const entries = [];
             if (inRange) {
                 renderState.expanded = new Set([target]);
-                const targetMsg = freshChat[target];
                 entries.push({ type: 'header', label: `定位 · 楼层 #${target}` });
-                entries.push({ index: target, message: targetMsg });
+                entries.push(buildMessageEntry(openedChat, target));
             } else {
                 renderState.expanded = new Set();
             }
             if (orderedMatches.length) {
                 entries.push({ type: 'header', label: `文本包含「${value}」的楼层（${orderedMatches.length}）` });
                 for (const index of orderedMatches) {
-                    entries.push({ index, message: freshChat[index] });
+                    entries.push(buildMessageEntry(openedChat, index));
                 }
             }
 
             if (!entries.length) {
-                renderEmpty(`楼层号 ${value} 超出范围（共 ${freshChat.length} 层，0 ~ ${freshChat.length - 1}），且没有楼层文本包含「${value}」`);
+                renderEmpty(`楼层号 ${value} 超出范围（共 ${openedChat.length} 层，0 ~ ${openedChat.length - 1}），且没有楼层文本包含「${value}」`);
                 return;
             }
 
@@ -941,15 +950,15 @@ function openFloorDirectoryDialog() {
 
         // 默认（空输入）：展示（按筛选）全部楼层。
         if (!keyword) {
-            showBrowse(collectMessageIndexes(freshChat), '');
+            showBrowse(collectMessageIndexes(openedChat), '');
             return;
         }
 
         // 关键词搜索模式（叠加筛选）
         const lowerKeyword = keyword.toLowerCase();
         const matchedIndexes = [];
-        for (let index = 0; index < freshChat.length; index += 1) {
-            const message = freshChat[index];
+        for (let index = 0; index < openedChat.length; index += 1) {
+            const message = openedChat[index];
             if (!passesFilter(message)) {
                 continue;
             }
