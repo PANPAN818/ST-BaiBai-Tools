@@ -952,29 +952,49 @@ function applyBaibaokuThemeObject(theme, fallbackName) {
 
     baibaokuThemePageCache.set(themeName, { ...theme, name: themeName });
 
-    const oldChatDisplay = power_user.chat_display;
-    const oldToastrPosition = power_user.toastr_position;
-    power_user.theme = themeName;
-    for (const key of BAIBAOKU_THEME_POWER_USER_KEYS) {
-        if (theme[key] !== undefined) {
-            power_user[key] = theme[key];
+    const applyNativeTheme = globalThis.baibaokuApplyNativeTheme;
+    const hydrateTheme = globalThis.baibaokuHydrateTheme;
+
+    if (typeof applyNativeTheme === 'function' && typeof hydrateTheme === 'function') {
+        // Preferred path: hydrate the native `themes` array with the freshly
+        // fetched full theme, then delegate to the native applyTheme so lazy
+        // switching runs the exact same code path as a normal theme switch.
+        // This avoids the chronic "this style switched but that one didn't"
+        // drift that comes from maintaining a parallel subset of applyTheme.
+        hydrateTheme({ ...theme, name: themeName });
+        power_user.theme = themeName;
+        setBaibaokuSelectValue('themes', themeName);
+        applyNativeTheme(themeName);
+        saveSettingsDebounced();
+    } else {
+        // Fallback for when the backend theme bridge has not patched
+        // power-user.js (older install, patch failed, etc.). Keep the legacy
+        // best-effort application so behavior never regresses to "no switch".
+        const oldChatDisplay = power_user.chat_display;
+        const oldToastrPosition = power_user.toastr_position;
+        power_user.theme = themeName;
+        for (const key of BAIBAOKU_THEME_POWER_USER_KEYS) {
+            if (theme[key] !== undefined) {
+                power_user[key] = theme[key];
+            }
         }
+
+        setBaibaokuSelectValue('themes', themeName);
+        applyBaibaokuThemeColorBindings();
+        applyBaibaokuThemeSelectState();
+        applyPowerUserSettings();
+        setBaibaokuSelectValue('themes', themeName);
+        applyBaibaokuThemeColorBindings();
+        applyBaibaokuThemeSelectState();
+        if (oldChatDisplay !== power_user.chat_display) {
+            $('#chat_display').trigger('change');
+        }
+        if (oldToastrPosition !== power_user.toastr_position) {
+            $('#toastr_position').trigger('change');
+        }
+        saveSettingsDebounced();
     }
 
-    setBaibaokuSelectValue('themes', themeName);
-    applyBaibaokuThemeColorBindings();
-    applyBaibaokuThemeSelectState();
-    applyPowerUserSettings();
-    setBaibaokuSelectValue('themes', themeName);
-    applyBaibaokuThemeColorBindings();
-    applyBaibaokuThemeSelectState();
-    if (oldChatDisplay !== power_user.chat_display) {
-        $('#chat_display').trigger('change');
-    }
-    if (oldToastrPosition !== power_user.toastr_position) {
-        $('#toastr_position').trigger('change');
-    }
-    saveSettingsDebounced();
     scheduleCustomCssCodeMirrorThemeSync();
     syncThemeManagerAfterLazyThemeApply(themeName);
     console.log(`${LOG_PREFIX} theme applied: ${themeName}`);
