@@ -16,6 +16,7 @@ import { isMobile } from '../../../RossAscends-mods.js';
 import { timestampToMoment } from '../../../utils.js';
 
 const FAST_CHAT_SEARCH_FETCH_KEY = '__baiBaiToolkitFastChatSearchFetchPatched';
+const BAIBAOKU_FAST_SEARCH_URL = '/api/plugins/baibaoku/v1/chats/fast-search';
 const FAST_CHAT_LIST_SCROLL_STYLE_ID = 'bai_bai_toolkit_fast_chat_list_scroll_style';
 const LONG_CHAT_DOM_RENDER_STYLE_ID = 'bai_bai_toolkit_long_chat_dom_render_style';
 const MESSAGE_EDIT_BOTTOM_ACTIONS_STYLE_ID = 'bai_bai_toolkit_message_edit_bottom_actions_style';
@@ -4078,9 +4079,19 @@ function patchFastChatSearchFetch() {
 
         if (requestData) {
             try {
-                return await fetchFastCharacterChatList(originalFetch, requestData);
+                return await fetchFastSearchList(originalFetch, requestData);
             } catch (error) {
-                console.debug(`${LOG_PREFIX} Fast chat list path failed; falling back to /api/chats/search`, error);
+                console.debug(`${LOG_PREFIX} Backend fast-search path failed; trying legacy fast path`, error);
+
+                // The legacy fast path only covers character chats. Group chats fall
+                // straight back to the original /api/chats/search below.
+                if (requestData.avatarUrl) {
+                    try {
+                        return await fetchFastCharacterChatList(originalFetch, { avatarUrl: requestData.avatarUrl });
+                    } catch (legacyError) {
+                        console.debug(`${LOG_PREFIX} Legacy fast chat list path failed; falling back to /api/chats/search`, legacyError);
+                    }
+                }
             }
         }
 
@@ -4117,11 +4128,21 @@ async function getFastChatSearchRequestData(input, init) {
     const avatarUrl = body.avatar_url;
     const groupId = body.group_id;
 
-    if (query.trim().length !== 0 || groupId || typeof avatarUrl !== 'string' || avatarUrl.length === 0) {
+    if (query.trim().length !== 0) {
         return null;
     }
 
-    return { avatarUrl };
+    const hasAvatar = typeof avatarUrl === 'string' && avatarUrl.length > 0;
+    const hasGroup = typeof groupId === 'string' && groupId.length > 0;
+
+    if (!hasAvatar && !hasGroup) {
+        return null;
+    }
+
+    return {
+        avatarUrl: hasAvatar ? avatarUrl : undefined,
+        groupId: hasGroup ? groupId : undefined,
+    };
 }
 
 function isChatSearchUrl(input) {
@@ -4150,6 +4171,42 @@ async function readJsonRequestBody(input, init) {
     }
 
     return null;
+}
+
+async function fetchFastSearchList(fetchFn, { avatarUrl, groupId }) {
+    const requestBody = { query: '' };
+
+    if (groupId) {
+        requestBody.group_id = groupId;
+    } else {
+        requestBody.avatar_url = avatarUrl;
+    }
+
+    const response = await fetchFn(BAIBAOKU_FAST_SEARCH_URL, {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+        throw new Error(`Unexpected status ${response.status}`);
+    }
+
+    const results = await response.json();
+
+    if (!Array.isArray(results)) {
+        throw new Error('fast-search returned a non-array payload');
+    }
+
+    // Backend fast-search returns the complete payload in one shot, matching ST's
+    // /api/chats/search response shape, so no placeholder/hydrate pass is needed.
+    // ST sorts the results itself (see script.js search consumer), so return as-is.
+    return new Response(JSON.stringify(results), {
+        status: 200,
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
 }
 
 async function fetchFastCharacterChatList(fetchFn, { avatarUrl }) {
