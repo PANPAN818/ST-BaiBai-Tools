@@ -23,7 +23,7 @@ import { sendMessageAs } from '../../../slash-commands.js';
 import { isAdmin } from '../../../user.js';
 import { debounce, download, getCharaFilename, getFileText, regexFromString, resetScrollHeight, setInfoBlock, uuidv4 } from '../../../utils.js';
 import { getCurrentPresetAPI as getRegexCurrentPresetAPI, getCurrentPresetName as getRegexCurrentPresetName, getScriptsByType as getRegexScriptsByType, runRegexScript, SCRIPT_TYPES as REGEX_SCRIPT_TYPES, substitute_find_regex } from '../../regex/engine.js';
-const CURRENT_VERSION = '0.27.5';
+const CURRENT_VERSION = '0.27.6';
 const LOCAL_ASSET_VERSION = getLocalAssetVersion(CURRENT_VERSION);
 const { SaveGenerateDisplay } = await importVersionedLocalModule('./saveGenerateDisplay.js');
 const chatOptimizations = await importVersionedLocalModule('./chatOptimizations.js');
@@ -2884,12 +2884,23 @@ async function renderSettingsPanel() {
             applyFeatureSettings();
         });
 
-    $('#bai_bai_toolkit_chat_loss_mitigation_enabled')
-        .prop('checked', settings.chatLossMitigationEnabled)
+    const chatLossMitigationSupported = isChatLossMitigationSupported();
+    const chatLossMitigationToggle = $('#bai_bai_toolkit_chat_loss_mitigation_enabled');
+    chatLossMitigationToggle
+        .prop('checked', chatLossMitigationSupported && settings.chatLossMitigationEnabled)
+        .prop('disabled', !chatLossMitigationSupported)
         .on('input', function () {
+            if (!isChatLossMitigationSupported()) {
+                return;
+            }
             settings.chatLossMitigationEnabled = Boolean($(this).prop('checked'));
             saveExtensionSettings();
         });
+    chatLossMitigationToggle.closest('label')
+        .toggleClass('disabled', !chatLossMitigationSupported)
+        .css('opacity', chatLossMitigationSupported ? '' : '0.55')
+        .find('span')
+        .text(chatLossMitigationSupported ? '缓解酒馆丢失聊天问题' : '缓解酒馆丢失聊天问题（1.16 及以上版本可用）');
 
     $('#bai_bai_toolkit_description_codemirror_editor_enabled')
         .prop('checked', settings.descriptionCodeMirrorEditorEnabled)
@@ -9871,13 +9882,24 @@ async function reloadCurrentChatForRegexChange() {
  * 触发点唯一(切正则/切预设),开销仅一次 chat.slice() 浅拷贝(复制引用,非序列化),
  * 普通发消息路径完全不经过。可通过设置项 chatLossMitigationEnabled 关闭(运行时生效)。
  */
+/**
+ * 检测当前 ST 是否支持聊天丢失缓解。
+ * 该功能依赖 reloadChatMutex(ST 1.16.0 起把 reloadCurrentChat 包装为 SimpleMutex 才引入),
+ * 低版本无此导出,功能无法安装。直接特性探测比解析版本字符串更可靠。
+ * @returns {boolean}
+ */
+function isChatLossMitigationSupported() {
+    const mutex = scriptModule.reloadChatMutex;
+    return !!mutex && typeof mutex.callback === 'function';
+}
+
 function installReloadGreetingGuard() {
     try {
-        const mutex = scriptModule.reloadChatMutex;
-        if (!mutex || typeof mutex.callback !== 'function') {
-            console.warn(`${LOG_PREFIX} 无法安装聊天丢失缓解:reloadChatMutex 不可用`);
+        if (!isChatLossMitigationSupported()) {
+            console.debug(`${LOG_PREFIX} 当前 ST 版本低于 1.16.0,聊天丢失缓解不可用,已跳过`);
             return;
         }
+        const mutex = scriptModule.reloadChatMutex;
         if (mutex.callback[RELOAD_GREETING_GUARD_KEY]) {
             return;
         }
