@@ -1125,6 +1125,21 @@ function openFloorDirectoryDialog() {
     apply('');
     syncClearButton();
 
+    // 桌面端：初次渲染后把当前高度锁成 min-height，避免之后筛选导致楼层变少、
+    // 弹窗高度回缩，因垂直居中而让顶部搜索/筛选栏整体下移。锁底后弹窗只增不减，
+    // 既保持初次居中，也不会在筛选时位移。移动端是全屏定高，无需处理。
+    requestAnimationFrame(() => {
+        const isCoarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches;
+        const isNarrow = window.matchMedia?.('(max-width: 600px)')?.matches;
+        if (isCoarsePointer || isNarrow) {
+            return;
+        }
+        const height = dialog.getBoundingClientRect().height;
+        if (height > 0) {
+            dialog.style.minHeight = `${Math.ceil(height)}px`;
+        }
+    });
+
     // 移动端不自动聚焦输入框：否则会立刻弹出软键盘，缩小可视视口把
     // position:fixed 的弹窗挤出屏幕（看起来像被关掉）。桌面端才自动聚焦。
     requestAnimationFrame(() => {
