@@ -286,6 +286,33 @@ async function deleteFloorRangeWithSlashCommand(ctx, index, options = {}) {
     return deleteCount;
 }
 
+// 用 ST 的 /hide、/unhide 斜杠命令切换单层的隐藏状态（is_system）。
+async function toggleFloorHiddenWithSlashCommand(ctx, index) {
+    const chat = getChatArray(ctx);
+    const message = chat[index];
+    if (!message) {
+        throw new Error('楼层不存在');
+    }
+
+    const executeSlashCommandsWithOptions = ctx?.executeSlashCommandsWithOptions;
+    if (typeof executeSlashCommandsWithOptions !== 'function') {
+        throw new Error('当前酒馆版本未暴露斜杠命令执行接口');
+    }
+
+    const willHide = !message.is_system;
+    const command = willHide ? `/hide ${index}` : `/unhide ${index}`;
+    const result = await executeSlashCommandsWithOptions(command, {
+        handleExecutionErrors: true,
+        source: 'floor-directory',
+    });
+
+    if (result?.isError) {
+        throw new Error(result.errorMessage || '斜杠命令执行失败');
+    }
+
+    return willHide;
+}
+
 // ---------------------------------------------------------------------------
 // 菜单按钮注入
 // ---------------------------------------------------------------------------
@@ -421,6 +448,7 @@ function openFloorDirectoryDialog() {
         { key: 'all', label: 'All' },
         { key: 'bot', label: 'Char' },
         { key: 'user', label: 'User' },
+        { key: 'hidden', label: 'Hide' },
     ];
     const filterButtons = new Map();
     for (const def of FILTERS) {
@@ -525,7 +553,10 @@ function openFloorDirectoryDialog() {
         const { keyword, totalItems } = renderState;
 
         if (!totalItems) {
-            const scope = renderState.filter === 'user' ? 'User ' : renderState.filter === 'bot' ? 'Char ' : '';
+            const scope = renderState.filter === 'user' ? 'User '
+                : renderState.filter === 'bot' ? 'Char '
+                : renderState.filter === 'hidden' ? '隐藏'
+                : '';
             const message = keyword
                 ? `没有${scope}楼层匹配「${keyword}」`
                 : scope ? `当前没有${scope}楼层` : '当前没有可显示的楼层';
@@ -655,7 +686,13 @@ function openFloorDirectoryDialog() {
         const tag = document.createElement('span');
         tag.className = 'bai-bai-floor-tag';
         tag.textContent = isUser ? 'User' : 'Char';
-        meta.append(speaker, tag);
+        // 隐藏楼层（is_system）：沿用 ST 的小幽灵标识，放在身份标签右边。
+        const ghost = document.createElement('span');
+        ghost.className = 'bai-bai-floor-ghost';
+        ghost.title = '已隐藏楼层（不参与上下文）';
+        ghost.setAttribute('aria-label', '已隐藏楼层');
+        ghost.innerHTML = '<i class="fa-solid fa-ghost"></i>';
+        meta.append(speaker, tag, ghost);
 
         const snippet = document.createElement('div');
         snippet.className = 'bai-bai-floor-snippet';
@@ -681,6 +718,9 @@ function openFloorDirectoryDialog() {
         editButton.type = 'button';
         editButton.className = 'bai-bai-floor-action';
         editButton.innerHTML = '<i class="fa-solid fa-pen-to-square"></i><span>编辑</span>';
+        const hideButton = document.createElement('button');
+        hideButton.type = 'button';
+        hideButton.className = 'bai-bai-floor-action';
         const deleteButton = document.createElement('button');
         deleteButton.type = 'button';
         deleteButton.className = 'bai-bai-floor-action bai-bai-floor-action-danger';
@@ -688,12 +728,23 @@ function openFloorDirectoryDialog() {
 
         body.append(detail, actions);
 
+        // 统一刷新「隐藏」相关的视觉：整行淡化、幽灵图标、隐藏/显示按钮的标题。
+        const applyHiddenState = () => {
+            const hidden = Boolean(message?.is_system);
+            row.classList.toggle('bai-bai-floor-row-hidden', hidden);
+            ghost.style.display = hidden ? '' : 'none';
+            hideButton.innerHTML = hidden
+                ? '<i class="fa-solid fa-eye"></i><span>显示</span>'
+                : '<i class="fa-solid fa-eye-slash"></i><span>隐藏</span>';
+        };
+        applyHiddenState();
+
         const renderView = () => {
             detail.classList.remove('bai-bai-floor-detail-editing');
             detail.style.height = '';
             detail.innerHTML = renderPreviewTextHtml(previewText);
             actions.innerHTML = '';
-            actions.append(deleteButton, editButton);
+            actions.append(hideButton, deleteButton, editButton);
         };
 
         const enterEdit = () => {
@@ -788,6 +839,35 @@ function openFloorDirectoryDialog() {
         };
 
         editButton.addEventListener('click', enterEdit);
+        hideButton.addEventListener('click', async () => {
+            const freshCtx = getStContext();
+            if (!freshCtx) {
+                toastError('无法读取聊天上下文，操作失败');
+                return;
+            }
+
+            hideButton.disabled = true;
+            const previousHtml = hideButton.innerHTML;
+            hideButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>处理中</span>';
+            try {
+                const nowHidden = await toggleFloorHiddenWithSlashCommand(freshCtx, index);
+                const latestChat = getChatArray(freshCtx);
+                if (latestChat.length) {
+                    chat = latestChat;
+                }
+                if (chat[index]) {
+                    updatePreview(chat[index]);
+                }
+                applyHiddenState();
+                toastSuccess(nowHidden ? `已隐藏第 ${index} 层` : `已显示第 ${index} 层`);
+            } catch (error) {
+                console.error(`${LOG_PREFIX} toggle floor hidden failed`, error);
+                hideButton.innerHTML = previousHtml;
+                toastError(`操作失败：${error?.message ?? error}`);
+            } finally {
+                hideButton.disabled = false;
+            }
+        });
         deleteButton.addEventListener('click', async () => {
             const freshCtx = getStContext();
             if (!freshCtx) {
@@ -868,13 +948,16 @@ function openFloorDirectoryDialog() {
         return row;
     };
 
-    // 按当前筛选判断消息是否保留：all 全要；user 仅用户；bot 仅非用户。
+    // 按当前筛选判断消息是否保留：all 全要；user 仅用户；bot 仅非用户；hidden 仅隐藏楼层。
     const passesFilter = message => {
         if (renderState.filter === 'user') {
             return Boolean(message?.is_user);
         }
         if (renderState.filter === 'bot') {
             return !message?.is_user;
+        }
+        if (renderState.filter === 'hidden') {
+            return Boolean(message?.is_system);
         }
         return true;
     };
@@ -1421,6 +1504,29 @@ function getStyleCss() {
 
 .${OVERLAY_CLASS} .bai-bai-floor-row-user .bai-bai-floor-tag {
     background: color-mix(in srgb, var(--SmartThemeUserMesBlurTintColor) 50%, transparent);
+}
+
+/* 隐藏楼层标识：身份标签右边的小幽灵。 */
+.${OVERLAY_CLASS} .bai-bai-floor-ghost {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.8rem;
+    line-height: 1;
+    color: var(--SmartThemeEmColor);
+    opacity: 0.75;
+}
+
+/* 隐藏楼层整行淡化，扫一眼即可区分。 */
+.${OVERLAY_CLASS} .bai-bai-floor-row-hidden .bai-bai-floor-num,
+.${OVERLAY_CLASS} .bai-bai-floor-row-hidden .bai-bai-floor-speaker,
+.${OVERLAY_CLASS} .bai-bai-floor-row-hidden .bai-bai-floor-snippet {
+    opacity: 0.55;
+}
+
+.${OVERLAY_CLASS} .bai-bai-floor-row-hidden .bai-bai-floor-rail::before {
+    background: var(--SmartThemeEmColor);
+    opacity: 0.5;
 }
 
 .${OVERLAY_CLASS} .bai-bai-floor-snippet {
