@@ -4598,6 +4598,22 @@ function syncPresetVuePromptListManagerState() {
     return true;
 }
 
+// 当某次结构变更已通过命令式方式就地同步到 DOM 与 Vue model 后,
+// 调用此函数把签名基线推进到当前状态,使随后的 syncPresetVuePromptListManagerState
+// 短路命中、不再触发整列重建。
+function markPresetVuePromptListSyncSignatureCurrent() {
+    const manager = getPresetVuePromptListManagerState();
+
+    if (!manager.state) {
+        return false;
+    }
+
+    const { renderSignature, structureSignature } = getPresetVuePromptListSyncSignatures(manager);
+    manager.lastSyncSignature = renderSignature;
+    manager.lastStructureSignature = structureSignature;
+    return true;
+}
+
 function getPresetVuePromptListSyncSignatures(manager = getPresetVuePromptListManagerState()) {
     const promptOrder = promptManager?.getPromptOrderForCharacter?.(promptManager.activeCharacter) ?? [];
     const prompts = Array.isArray(promptManager?.serviceSettings?.prompts)
@@ -4608,7 +4624,6 @@ function getPresetVuePromptListSyncSignatures(manager = getPresetVuePromptListMa
     const favoriteState = getCurrentPresetPromptFavoritesState(
         promptOrder.map(entry => entry?.identifier).filter(Boolean),
     );
-    const counts = promptManager?.tokenHandler?.getCounts?.() ?? {};
     const toggleDisabled = promptManager?.configuration?.toggleDisabled ?? [];
     const overriddenPrompts = Array.isArray(promptManager?.overriddenPrompts) ? promptManager.overriddenPrompts : [];
     const promptParts = promptOrder.map((entry, index) => {
@@ -4652,16 +4667,9 @@ function getPresetVuePromptListSyncSignatures(manager = getPresetVuePromptListMa
         Array.from(toggleDisabled).join('|'),
         overriddenPrompts.join('|'),
     ].join('||'));
-    const tokenSignature = promptOrder
-        .map(entry => `${entry?.identifier || ''}:${counts[entry?.identifier] ?? ''}`)
-        .join('|');
-    const renderSignature = getStringHash([
-        structureSignature,
-        tokenSignature,
-        promptManager?.tokenUsage ?? '',
-        promptManager?.serviceSettings?.openai_max_context ?? '',
-        promptManager?.serviceSettings?.openai_max_tokens ?? '',
-    ].join('||'));
+    // Token 数变化不再纳入 renderSignature:token 显示走命令式 DOM 更新
+    // (updatePromptManagerTokenDisplay),避免每次 token 重算都重建整个 Vue 列表。
+    const renderSignature = structureSignature;
 
     return { renderSignature, structureSignature };
 }
@@ -9943,7 +9951,7 @@ function updatePresetVuePromptItemEnabled(promptId, enabled) {
         .filter(item => item?.id === promptId);
 
     if (!items.length) {
-        return;
+        return false;
     }
 
     for (const item of items) {
@@ -9953,6 +9961,8 @@ function updatePresetVuePromptItemEnabled(promptId, enabled) {
             item.orderEntry.enabled = Boolean(enabled);
         }
     }
+
+    return true;
 }
 
 function handlePresetPromptDragPointerDown(event) {
@@ -11133,9 +11143,14 @@ async function refreshPromptManagerTokensForMissingContext() {
 
     try {
         await refreshPromptManagerStaticTokensWithoutChatContext();
-        await renderPromptManagerListWithoutTokenStats();
         if (isPresetVuePromptListManagerActive()) {
+            // Vue 列表已激活时,跳过 ST 原生 renderPromptManagerListWithoutTokenStats:
+            // 它内部的 promptManager.renderPromptManager() 会重建整个面板 DOM、抹掉
+            // Vue host,迫使列表从零重装(丢失当前状态、并造成卡顿)。结构已在 Vue model 中,
+            // token 数走命令式 DOM 更新即可。
             syncPresetVuePromptListManagerState();
+        } else {
+            await renderPromptManagerListWithoutTokenStats();
         }
         schedulePromptManagerTokenDisplayUpdate();
     } catch (error) {
@@ -12467,7 +12482,12 @@ function handlePresetPromptToggleClick(event) {
         updatePromptTokenCell(promptRow, null);
     }
 
-    updatePresetVuePromptItemEnabled(promptId, promptOrderEntry.enabled);
+    // DOM 与 Vue model 已就地同步;若成功,刷新签名基线,
+    // 避免随后的 token 刷新把这次结构变更当作需要整列重建。
+    const vueUpdated = updatePresetVuePromptItemEnabled(promptId, promptOrderEntry.enabled);
+    if (vueUpdated && isPresetVuePromptListManagerActive()) {
+        markPresetVuePromptListSyncSignatureCurrent();
+    }
     markPresetPromptServiceSettingsSavePending();
     markOpenAiPresetSavePending();
 
@@ -12661,25 +12681,27 @@ function updatePromptToggleRow(row, toggle, isEnabled) {
     }
 }
 
-function updatePromptTokenCell(row, value) {
+function updatePromptTokenCell(row, value, warning = null) {
     const tokenCell = row.querySelector('.prompt_manager_prompt_tokens');
 
     if (!tokenCell) {
         return;
     }
 
+    const warningClass = warning?.warningClass ?? '';
+    const warningTitle = warning?.warningTitle ?? '';
     const displayValue = value ? String(value) : '-';
     const existingWarning = tokenCell.querySelector('span');
     if (tokenCell.dataset.pmTokens === displayValue
         && tokenCell.textContent?.trim() === displayValue
-        && !existingWarning?.className
-        && !existingWarning?.title) {
+        && (existingWarning?.className ?? '') === warningClass
+        && (existingWarning?.title ?? '') === warningTitle) {
         return;
     }
 
     const warningSpan = existingWarning ?? document.createElement('span');
-    warningSpan.className = '';
-    warningSpan.title = '';
+    warningSpan.className = warningClass;
+    warningSpan.title = warningTitle;
     warningSpan.textContent = ' ';
     tokenCell.dataset.pmTokens = displayValue;
     tokenCell.replaceChildren(warningSpan, document.createTextNode(displayValue));
@@ -13865,8 +13887,22 @@ function updatePromptManagerTokenDisplay() {
         return;
     }
 
+    const prompts = Array.isArray(promptManager?.serviceSettings?.prompts)
+        ? promptManager.serviceSettings.prompts.filter(Boolean)
+        : [];
+    const promptById = new Map(prompts.map(prompt => [prompt.identifier, prompt]));
+    const tokenBudget = (promptManager?.serviceSettings?.openai_max_context ?? 0)
+        - (promptManager?.serviceSettings?.openai_max_tokens ?? 0);
+    const isTokenUsageWarning = (promptManager?.tokenUsage ?? 0) > tokenBudget * 0.8;
+
     for (const row of list.querySelectorAll('li.completion_prompt_manager_prompt[data-pm-identifier]')) {
-        updatePromptTokenCell(row, counts[row.dataset.pmIdentifier] ?? 0);
+        const identifier = row.dataset.pmIdentifier;
+        const tokens = counts[identifier] ?? 0;
+        const prompt = promptById.get(identifier);
+        const warning = prompt
+            ? getPromptTokenWarning({ prompt, tokens, isTokenUsageWarning })
+            : null;
+        updatePromptTokenCell(row, tokens, warning);
     }
 
     const header = document.querySelector('.completion_prompt_manager_header');
