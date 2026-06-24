@@ -12979,6 +12979,10 @@ async function refreshPromptManagerTokens({ reason = 'prompt manager token refre
 }
 
 function isPromptManagerTokenPanelVisible() {
+    if (document.visibilityState === 'hidden') {
+        return false;
+    }
+
     const list = document.querySelector(PRESET_PROMPT_MANAGER_LIST_SELECTOR);
     const container = promptManager?.containerElement;
 
