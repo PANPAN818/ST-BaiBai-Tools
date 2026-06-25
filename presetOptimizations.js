@@ -8882,7 +8882,7 @@ async function finishPresetVuePromptGroupRangeSelection(model) {
         id: groupId,
         name: trimmedName,
         order: groupState.groups.length,
-        collapsed: false,
+        collapsed: true,
         enabled: true,
     });
 
@@ -12840,7 +12840,9 @@ function applyPresetSaveOptimization() {
 }
 
 function handlePresetPromptToggleClick(event) {
-    if (!settings.presetToggleOptimizationEnabled) {
+    // 分组模式下的条目列表由插件自行渲染(Vue),开关按钮没有 ST 原生 click 监听,
+    // 只能靠此委托处理器响应。因此开启分组时也必须处理,即使 toggle 优化开关本身是关的。
+    if (!settings.presetToggleOptimizationEnabled && !isPresetGroupingEnabled()) {
         return;
     }
 
