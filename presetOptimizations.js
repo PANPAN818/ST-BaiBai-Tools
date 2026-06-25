@@ -4146,7 +4146,9 @@ function removePresetVuePromptListManager({ skipRestore = false } = {}) {
     setPresetVuePromptDragScrollGuardEnabled(false);
     document.body?.classList.remove(PRESET_VUE_DRAGGING_BODY_CLASS);
 
-    removePresetVuePromptListRenderPatch();
+    if (!settings.presetSwitchOptimizationEnabled) {
+        removePresetVuePromptListRenderPatch();
+    }
     removePresetVueDynamicDragDelayHandlers();
 
     unmountPresetVuePromptListApp(manager);
@@ -4465,6 +4467,12 @@ function installPresetVuePromptListRenderPatch() {
     const originalRenderPromptManagerListItems = promptManager.renderPromptManagerListItems;
     const patchedRenderPromptManagerListItems = async function (...args) {
         if (!isPresetGroupingEnabled()) {
+            if (settings.presetSwitchOptimizationEnabled && isPromptManagerReadyForFastPresetSwitch()) {
+                await renderPromptManagerListItemsFast();
+                schedulePromptManagerDraggableInit();
+                return undefined;
+            }
+
             return originalRenderPromptManagerListItems.apply(this, args);
         }
 
@@ -10856,6 +10864,7 @@ function applyPresetSwitchOptimization() {
     applyPresetSelectChangeDeferral();
     applyPresetDeleteSelectionOptimization();
     applyPresetListActionDelegation();
+    installPresetVuePromptListRenderPatch();
     applyPresetGroupDeletedCleanup();
     applyPresetGroupImportCleanup();
     applyPresetGroupRenameCleanup();
@@ -12514,6 +12523,7 @@ function applyPromptManagerPresetFieldsEarly(preset) {
 }
 
 async function renderPromptManagerListWithoutTokenStats() {
+    installPresetVuePromptListRenderPatch();
     const scrollContainer = promptManager.containerElement.closest('.scrollableInner');
     const scrollTop = scrollContainer?.scrollTop;
     const renderCycle = (extensionState.presetPromptManagerFastRenderCycle ?? 0) + 1;
