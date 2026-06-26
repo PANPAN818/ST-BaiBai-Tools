@@ -52,7 +52,7 @@ const LONG_CHAT_DOM_RENDER_ESTIMATE_EXTRA_PX = 80;
 const LONG_CHAT_DOM_RENDER_ESTIMATE_MAX_HEIGHT = 80000;
 const LONG_CHAT_DOM_RENDER_ESTIMATOR_ALPHA = 0.35;
 const LONG_CHAT_DOM_RENDER_ESTIMATOR_MAX_SCALE = 4;
-const LONG_CHAT_DOM_RENDER_FORCE_DISABLED = true;
+const LONG_CHAT_DOM_RENDER_FORCE_DISABLED = false;
 const LONG_CHAT_DOM_RENDER_BOTTOM_ANCHOR_CLASS = 'bai-bai-toolkit-long-chat-bottom-anchor';
 const LONG_CHAT_DOM_RENDER_BOTTOM_ANCHORED_CLASS = 'bai-bai-toolkit-long-chat-bottom-anchored';
 const LONG_CHAT_DOM_RENDER_HEIGHT_VAR = '--bai-bai-toolkit-long-chat-mes-height';
@@ -1608,6 +1608,12 @@ function batchMeasureLongChatDomRenderHeights(elements, editingMessages) {
             continue;
         }
         if (element.classList.contains('bai-bai-toolkit-long-chat-contained')) {
+            continue;
+        }
+        // 只对视口附近的楼层做真实测量,离屏楼层留给 applyLongChatDomRenderToMessage 走偏大的估算占位,
+        // 之后滚进视口时由 ResizeObserver -> updateLongChatDomRenderHeightCache 用真实高度校准。
+        // 避免进入长聊天时全量 getBoundingClientRect/offsetHeight 导致的卡顿(成本恒定,与总楼层数无关)。
+        if (!isLongChatDomRenderNearViewport(element)) {
             continue;
         }
 
