@@ -30,10 +30,6 @@ const LINKED_PRESET_OPTIMIZATION_OPTIONS = [
         selector: '#bai_bai_toolkit_preset_mobile_whole_row_drag_enabled',
     },
     {
-        key: 'presetSwitchOptimizationEnabled',
-        selector: '#bai_bai_toolkit_preset_switch_optimization_enabled',
-    },
-    {
         key: 'presetToggleOptimizationEnabled',
         selector: '#bai_bai_toolkit_preset_toggle_optimization_enabled',
     },
@@ -256,6 +252,14 @@ export function bindPresetOptimizationSettings({ saveSettings } = {}) {
     };
 
     LINKED_PRESET_OPTIMIZATION_OPTIONS.forEach(bindLinkedPresetOptimizationOption);
+
+    $('#bai_bai_toolkit_preset_switch_optimization_enabled')
+        .prop('checked', settings.presetSwitchOptimizationEnabled === true)
+        .on('input', function () {
+            settings.presetSwitchOptimizationEnabled = Boolean($(this).prop('checked'));
+            persistSettings();
+            applyPresetSwitchOptimization();
+        });
 
     $('#bai_bai_toolkit_preset_grouping_enabled')
         .prop('checked', settings.presetGroupingEnabled !== false)
@@ -9428,10 +9432,10 @@ function renderPresetPromptControlsHtml({ canDelete, canEdit, canToggle, isEnabl
         <span title="${escapeHtml(t`更多操作`)}" class="menu_button bai-bai-preset-prompt-icon-button bai-bai-preset-prompt-actions-hint fa-solid fa-ellipsis"></span>
         <span class="bai-bai-preset-prompt-actions">
             ${renderPresetPromptActionButtonHtml({
-                action: 'global-library',
-                icon: 'fa-database',
-                text: t`添加到全局库`,
-            })}
+        action: 'global-library',
+        icon: 'fa-database',
+        text: t`添加到全局库`,
+    })}
             ${deleteItemHtml}
             ${copyItemHtml}
             ${editItemHtml}
@@ -11843,7 +11847,7 @@ async function promptPresetPromptDeleteChoice(promptId) {
     const canDelete = isPresetPromptDeleteOrDetachAllowed(prompt);
     const customButtons = [
         {
-            text: t`仅从当前预设移除`,
+            text: t`仅移除`,
             icon: 'fa-chain-broken',
             result: PRESET_PROMPT_DELETE_CHOICE_DETACH,
         },
@@ -11851,7 +11855,7 @@ async function promptPresetPromptDeleteChoice(promptId) {
 
     if (canDelete) {
         customButtons.push({
-            text: t`彻底删除条目`,
+            text: t`彻底删除`,
             icon: 'fa-trash',
             result: PRESET_PROMPT_DELETE_CHOICE_DELETE,
             classes: ['caution'],

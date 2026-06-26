@@ -23,7 +23,7 @@ import { sendMessageAs } from '../../../slash-commands.js';
 import { isAdmin } from '../../../user.js';
 import { debounce, download, getCharaFilename, getFileText, regexFromString, resetScrollHeight, setInfoBlock, uuidv4 } from '../../../utils.js';
 import { getCurrentPresetAPI as getRegexCurrentPresetAPI, getCurrentPresetName as getRegexCurrentPresetName, getScriptsByType as getRegexScriptsByType, runRegexScript, SCRIPT_TYPES as REGEX_SCRIPT_TYPES, substitute_find_regex } from '../../regex/engine.js';
-const CURRENT_VERSION = '0.27.13';
+const CURRENT_VERSION = '0.27.15';
 const LOCAL_ASSET_VERSION = getLocalAssetVersion(CURRENT_VERSION);
 const { SaveGenerateDisplay } = await importVersionedLocalModule('./saveGenerateDisplay.js');
 const chatOptimizations = await importVersionedLocalModule('./chatOptimizations.js');
@@ -355,7 +355,7 @@ const defaultSettings = {
     welcomeRecentChatDirectOpenEnabled: true,
     saveRequestGzipEnabled: true,
     translateMessageUpdatedOptimizationEnabled: true,
-    longChatDomRenderOptimizationEnabled: false,
+    longChatDomRenderOptimizationEnabled: true,
     messageCompletionScrollToMiddleEnabled: true,
     chatListScrollOptimizationEnabled: true,
     chatListAutoClearEnabled: true,
@@ -389,7 +389,6 @@ const linkedPresetOptimizationSettingKeys = [
     'presetScrollOptimizationEnabled',
     'presetDragOptimizationEnabled',
     'presetMobileWholeRowDragEnabled',
-    'presetSwitchOptimizationEnabled',
     'presetToggleOptimizationEnabled',
 ];
 const legacySettingsKeys = [
@@ -12889,14 +12888,37 @@ function getCurrentSaveGenerateDescriptor(body = null) {
         return null;
     }
 
+    const type = String(body?.type || 'normal');
     return {
         kind: 'character',
-        type: String(body?.type || 'normal'),
+        type,
         chatId,
         avatar_url: character.avatar,
         file_name: character.chat,
         ch_name: character.name || '',
+        expectedFloor: computeSaveGenerateExpectedFloor(type),
     };
+}
+
+// The floor index the assistant reply is expected to occupy in the open chat,
+// measured against the page's in-memory chat array (the same basis used by every
+// other front-end floor check). The back-end stores this verbatim and echoes it
+// back, so the duplicate/recovery decision compares one consistent basis instead
+// of the front-end's array index against the back-end's on-disk line count.
+//
+// A 'normal' reply always appends after the tail → tailFloor + 1.
+// A 'regenerate' first deletes the trailing assistant reply (if any), then
+// generates in its place:
+//   - tail is the assistant reply  → it gets replaced in place  → tailFloor
+//   - tail is a user message       → nothing to delete, append  → tailFloor + 1
+function computeSaveGenerateExpectedFloor(type) {
+    const tail = getCurrentSaveGenerateChatTailMessage();
+    const tailFloor = tail && Number.isInteger(tail.floor) ? tail.floor : -1;
+    const tailIsAssistant = Boolean(tail?.message && tail.message.is_user !== true);
+    if (String(type || 'normal') === 'regenerate' && tailIsAssistant) {
+        return tailFloor;
+    }
+    return tailFloor + 1;
 }
 
 function getCurrentSaveGenerateChatId() {
@@ -12931,6 +12953,8 @@ async function fetchSaveGenerate(state, requestInfo, input, init) {
 
     const activeChatId = String(requestInfo.save?.chatId || '').trim();
     const isStream = requestInfo.body?.stream === true;
+    const currentTail = getCurrentSaveGenerateChatTailMessage();
+    console.log(`${LOG_PREFIX} [楼层日志] 发送生成请求 type=${requestInfo.save?.type} chatId=${activeChatId} 当前末尾楼层=${currentTail?.floor ?? -1} 期望楼层=${requestInfo.save?.expectedFloor}`);
     const cancelTarget = setActiveSaveGenerateCancelTarget(state, {
         jobId: '',
         chatId: activeChatId,
@@ -13806,13 +13830,16 @@ async function runCurrentSaveGenerateJobCheck(state, chatId, reason = 'unknown',
         const effectiveLastMessageHash = typeof lastMessageHash === 'string'
             ? lastMessageHash
             : getCurrentSaveGenerateLastMessageHash();
+        const resumeLastMessageInfo = getCurrentSaveGenerateLastMessageInfo();
         const job = await fetchSaveGenerateJobByChatId(state.originalFetch, chatId, {
             lastMessageHash: effectiveLastMessageHash,
-            lastMessageInfo: getCurrentSaveGenerateLastMessageInfo(),
+            lastMessageInfo: resumeLastMessageInfo,
         }).catch(error => {
             console.debug(`${LOG_PREFIX} save-generate resume check failed`, error);
             return null;
         });
+
+        console.log(`${LOG_PREFIX} [楼层日志] resume检查(${reason}) 上报末尾楼层=${resumeLastMessageInfo.floor} role=${resumeLastMessageInfo.role} → 后端${job?.id ? `返回job=${job.id} status=${job.status} 期望楼层=${job.save?.expectedFloor}` : '未返回job(已被后端拦截或无job)'}`);
 
         state.lastResumeCheckChatId = chatId;
         state.lastResumeCheckAt = Date.now();
@@ -14680,7 +14707,37 @@ async function insertSaveGenerateJobWithSendAs(job, chatId, reason = 'unknown') 
     }
 }
 
+// The reply may only be inserted when the open chat's current tail sits exactly
+// one floor below where this job expected its reply to land. If the tail is at or
+// past that floor the reply is already present (the duplicate case); if it is more
+// than one floor short something else changed and inserting would be wrong. Both
+// sides of this comparison use the page's in-memory chat array — the same basis
+// the front end used to compute expectedFloor at request time — so there is no
+// drift against the back end's on-disk line count. Returns null when the job
+// carries no expectedFloor (legacy jobs), letting callers fall back.
+function isSaveGenerateExpectedFloorInsertable(job) {
+    const expectedFloor = Number.isInteger(job?.save?.expectedFloor) ? job.save.expectedFloor : -1;
+    if (expectedFloor < 0) {
+        console.log(`${LOG_PREFIX} [楼层日志] 恢复判定 job=${job?.id} 期望楼层=缺失(旧job) → 回退旧逻辑`);
+        return null;
+    }
+
+    const tail = getCurrentSaveGenerateChatTailMessage();
+    const tailFloor = tail && Number.isInteger(tail.floor) ? tail.floor : -1;
+    const insertable = tailFloor + 1 === expectedFloor;
+    console.log(`${LOG_PREFIX} [楼层日志] 恢复判定 job=${job?.id} 当前末尾楼层=${tailFloor} 期望楼层=${expectedFloor} 末尾+1=${tailFloor + 1} → ${insertable ? '一致,允许插入(恢复)' : '不一致,不插入(挡重复)'}`);
+    return insertable;
+}
+
 function isCurrentSaveGenerateMessageAlreadyInserted(job) {
+    // Prefer the single-basis expectedFloor decision when the job carries one:
+    // if the reply is not insertable at the current tail, treat it as already
+    // present so callers suppress the insert.
+    const insertable = isSaveGenerateExpectedFloorInsertable(job);
+    if (insertable !== null) {
+        return !insertable;
+    }
+
     const messages = scriptModule.chat;
     if (!Array.isArray(messages) || messages.length === 0) {
         return false;
