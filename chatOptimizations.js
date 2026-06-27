@@ -70,6 +70,8 @@ const WELCOME_PANEL_SELECTOR = '#chat .welcomePanel';
 const WELCOME_RECENT_CHAT_SELECTOR = '#chat .welcomePanel .recentChat';
 const WELCOME_RECENT_CHAT_ACTION_SELECTOR = '.renameChat, .deleteChat, .pinChat, button, a, input, select, textarea';
 const MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS = 'bai-bai-toolkit-message-edit-bottom-actions';
+const MESSAGE_EDIT_BOTTOM_ACTIONS_RELEVANT_SELECTOR = `#curEditTextarea, .mes_edit_buttons, .mes_edit_done, .mes_edit_cancel, .${MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS}`;
+const MESSAGE_EDIT_BOTTOM_ACTIONS_CONTROL_SCOPE_SELECTOR = `.mes_edit_buttons, .mes_edit_done, .mes_edit_cancel, .${MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS}`;
 const MOBILE_MESSAGE_EDIT_SELECTOR = '#curEditTextarea, .reasoning_edit_textarea';
 const MOBILE_AUTO_KEYBOARD_TARGET_SELECTOR = '#curEditTextarea, #select_chat_search';
 const MOBILE_CHAT_ENTRY_KEYBOARD_TARGET_SELECTOR = '#send_textarea';
@@ -2331,8 +2333,10 @@ function installMessageEditBottomActions() {
 
     state.observer?.disconnect();
     state.chatElement = chat;
-    state.observer = new MutationObserver(() => {
-        scheduleMessageEditBottomActionsUpdate();
+    state.observer = new MutationObserver((mutations) => {
+        if (isMessageEditBottomActionsMutationRelevant(mutations)) {
+            scheduleMessageEditBottomActionsUpdate();
+        }
     });
     state.observer.observe(chat, {
         childList: true,
@@ -2340,6 +2344,52 @@ function installMessageEditBottomActions() {
         attributes: true,
         attributeFilter: ['style', 'class'],
     });
+}
+
+function isMessageEditBottomActionsMutationRelevant(mutations) {
+    for (const mutation of mutations) {
+        if (isMessageEditBottomActionsMutationTargetRelevant(mutation)) {
+            return true;
+        }
+
+        for (const node of mutation.addedNodes) {
+            if (isMessageEditBottomActionsNodeRelevant(node)) {
+                return true;
+            }
+        }
+
+        for (const node of mutation.removedNodes) {
+            if (isMessageEditBottomActionsNodeRelevant(node)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function isMessageEditBottomActionsMutationTargetRelevant(mutation) {
+    const target = mutation.target;
+    if (!(target instanceof Element)) {
+        return false;
+    }
+
+    if (target.matches(MESSAGE_EDIT_BOTTOM_ACTIONS_RELEVANT_SELECTOR)
+        || target.closest(MESSAGE_EDIT_BOTTOM_ACTIONS_CONTROL_SCOPE_SELECTOR)) {
+        return true;
+    }
+
+    const message = target.closest('.mes');
+    return message instanceof HTMLElement && Boolean(message.querySelector('#curEditTextarea'));
+}
+
+function isMessageEditBottomActionsNodeRelevant(node) {
+    if (!(node instanceof Element)) {
+        return false;
+    }
+
+    return node.matches(MESSAGE_EDIT_BOTTOM_ACTIONS_RELEVANT_SELECTOR)
+        || Boolean(node.querySelector(MESSAGE_EDIT_BOTTOM_ACTIONS_RELEVANT_SELECTOR));
 }
 
 function removeMessageEditBottomActions() {
@@ -2376,11 +2426,15 @@ function updateMessageEditBottomActions() {
         return;
     }
 
-    installMessageEditBottomActions();
-
     const chat = document.querySelector('#chat');
     if (!(chat instanceof HTMLElement)) {
+        installMessageEditBottomActions();
         return;
+    }
+
+    const state = getMessageEditBottomActionsState();
+    if (!state.observer || state.chatElement !== chat || !document.getElementById(MESSAGE_EDIT_BOTTOM_ACTIONS_STYLE_ID)) {
+        installMessageEditBottomActions();
     }
 
     const activeEditor = chat.querySelector('#curEditTextarea');
@@ -2555,7 +2609,7 @@ function ensureMessageEditBottomActionsStyle() {
         document.head.append(style);
     }
 
-    style.textContent = `
+    const css = `
 #chat .${MESSAGE_EDIT_BOTTOM_ACTIONS_CLASS} {
     display: flex;
     justify-content: flex-end;
@@ -2583,6 +2637,10 @@ function ensureMessageEditBottomActionsStyle() {
     opacity: 1;
 }
 `;
+
+    if (style.textContent !== css) {
+        style.textContent = css;
+    }
 }
 
 function applyMobileAutoKeyboardSuppression() {
