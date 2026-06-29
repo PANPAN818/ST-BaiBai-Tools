@@ -271,6 +271,14 @@ export function bindPresetOptimizationSettings({ saveSettings } = {}) {
             applyPresetGrouping();
         });
 
+    $('#bai_bai_toolkit_preset_grouping_edit_button_in_menu_enabled')
+        .prop('checked', settings.presetGroupingEditButtonInMenuEnabled === true)
+        .on('input', function () {
+            settings.presetGroupingEditButtonInMenuEnabled = Boolean($(this).prop('checked'));
+            persistSettings();
+            refreshPresetVuePromptListControlsLayout();
+        });
+
     $('#bai_bai_toolkit_preset_prompt_codemirror_editor_enabled')
         .prop('checked', settings.presetPromptCodeMirrorEditorEnabled)
         .on('input', function () {
@@ -4810,6 +4818,19 @@ function markPresetVuePromptListSyncSignatureCurrent() {
     manager.lastSyncSignature = renderSignature;
     manager.lastStructureSignature = structureSignature;
     return true;
+}
+
+// 「分组后把编辑按钮收进菜单」开关只影响条目控件的渲染位置(不改条目数据),
+// 普通 sync 会因签名命中而短路,这里清空签名基线强制整列重渲染一次。仅在分组已挂载时生效。
+function refreshPresetVuePromptListControlsLayout() {
+    const manager = getPresetVuePromptListManagerState();
+
+    if (!manager.state) {
+        return;
+    }
+
+    manager.lastSyncSignature = '';
+    syncPresetVuePromptListManagerState();
 }
 
 function getPresetVuePromptListSyncSignatures(manager = getPresetVuePromptListManagerState()) {
@@ -9372,6 +9393,8 @@ function renderPresetVuePromptControls(h, prompt, item, { favoriteMirror = false
             onClick: event => handlePresetPromptActionButtonClick(event),
         })
         : null;
+    // 默认(关)时编辑按钮平铺在省略号菜单右侧,点一次即可编辑;开启时才收进收缩菜单。
+    const editButtonInMenu = settings.presetGroupingEditButtonInMenuEnabled === true;
 
     const globalLibraryButton = renderPresetVuePromptActionButton(h, {
         action: 'global-library',
@@ -9437,8 +9460,9 @@ function renderPresetVuePromptControls(h, prompt, item, { favoriteMirror = false
                 text: t`复制`,
                 onClick: event => handlePresetPromptActionButtonClick(event),
             }),
-            editButton,
+            editButtonInMenu ? editButton : null,
         ].filter(Boolean)),
+        editButtonInMenu ? null : editButton,
         canToggle
             ? h('span', {
                 title: isEnabled ? t`关闭条目` : t`开启条目`,

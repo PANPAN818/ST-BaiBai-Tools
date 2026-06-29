@@ -436,6 +436,7 @@ function removeMessageCompletionScrollToMiddle() {
     clearTimeout(state.anchorTimer);
     state.anchorTimer = null;
     clearMessageCompletionScrollTimers(state);
+    finishMessageCompletionScrollSettle(state);
     removeLongChatDomRenderBottomAnchor(state);
     detachMessageCompletionScrollChatListener(state);
 }
@@ -467,12 +468,13 @@ function handleMessageCompletionScrollGenerationEnded(state = getMessageCompleti
     }
 
     const chat = document.querySelector('#chat');
+    // 生成结束后无条件定位一次:不再要求「开始时在底部」或「结束时在底部」。
+    // iOS 上这些底部判定经常因平滑滚动/地址栏伸缩/子像素抖动而落空,导致定位时常不触发。
+    // 仍保留的前置条件:用户在生成期间手动翻看了别处(userInteracted)、当前不是欢迎页、聊天容器存在。
     const shouldScroll = Boolean(
         !state.userInteracted
-        && (
-            (state.generationActive && state.shouldScroll)
-            || (chat instanceof HTMLElement && !isWelcomePageDisplayed(chat) && isLongChatDomRenderAtBottom(chat))
-        ),
+        && chat instanceof HTMLElement
+        && !isWelcomePageDisplayed(chat),
     );
     state.generationActive = false;
     state.shouldScroll = false;
@@ -523,7 +525,10 @@ function ensureMessageCompletionScrollChatListener(state = getMessageCompletionS
     detachMessageCompletionScrollChatListener(state);
     state.chatElement = chat;
     state.userInteractionHandler = () => {
-        if (!state.generationActive) {
+        // settle 阶段(生成已结束、脚本仍在每帧强制写 scrollTop)也要能被用户打断,
+        // 否则 iOS 上脚本会和手指/惯性滚动抢 scrollTop,表现为定位时灵时不灵、猛地回弹,
+        // 甚至被顶到顶部触发下拉刷新。
+        if (!state.generationActive && !state.scrollSettling) {
             return;
         }
         state.userInteracted = true;
@@ -550,8 +555,39 @@ function scheduleMessageCompletionScrollToMiddle(state = getMessageCompletionScr
     state.lastScrollHeight = 0;
     state.lastTargetTop = null;
     state.stableFrames = 0;
+    // 进入 settle:标记滚动进行中(让用户触摸能打断),并临时锁住 iOS 的 overscroll 链,
+    // 防止脚本强制写 scrollTop 把页面顶到顶部冒泡触发下拉刷新。
+    state.scrollSettling = true;
+    ensureMessageCompletionScrollOverscrollGuard(state);
 
     settleMessageCompletionScrollToLatestMessageStart(state, token, reason);
+}
+
+function finishMessageCompletionScrollSettle(state = getMessageCompletionScrollState()) {
+    state.scrollSettling = false;
+    releaseMessageCompletionScrollOverscrollGuard(state);
+}
+
+function ensureMessageCompletionScrollOverscrollGuard(state = getMessageCompletionScrollState()) {
+    const chat = state.chatElement instanceof HTMLElement
+        ? state.chatElement
+        : document.querySelector('#chat');
+    if (!(chat instanceof HTMLElement) || state.overscrollGuardElement === chat) {
+        return;
+    }
+
+    state.overscrollGuardElement = chat;
+    state.overscrollGuardPrevious = chat.style.overscrollBehavior || '';
+    chat.style.overscrollBehavior = 'contain';
+}
+
+function releaseMessageCompletionScrollOverscrollGuard(state = getMessageCompletionScrollState()) {
+    const chat = state.overscrollGuardElement;
+    if (chat instanceof HTMLElement) {
+        chat.style.overscrollBehavior = state.overscrollGuardPrevious || '';
+    }
+    state.overscrollGuardElement = null;
+    state.overscrollGuardPrevious = '';
 }
 
 function clearMessageCompletionScrollTimers(state = getMessageCompletionScrollState()) {
@@ -573,11 +609,13 @@ function settleMessageCompletionScrollToLatestMessageStart(state = getMessageCom
     if (token !== Number(state.generationToken || 0)
         || settings.messageCompletionScrollToMiddleEnabled === false
         || state.userInteracted) {
+        finishMessageCompletionScrollSettle(state);
         return;
     }
 
     const settled = scrollLatestMessageToMiddleAfterCompletion(state, reason);
     if (settled) {
+        finishMessageCompletionScrollSettle(state);
         return;
     }
 
