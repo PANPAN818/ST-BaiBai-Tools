@@ -9473,49 +9473,26 @@ function renderPresetVuePromptActionButton(h, { action, icon, text, caution = fa
     });
 }
 
-function renderPresetPromptControlsHtml({ canDelete, canEdit, canToggle, isEnabled }) {
+// 与 ST 原生 PromptManager 的平铺菜单逐字节一致(detach / edit / toggle),不可用时回退占位
+// <span class="fa-solid"></span>。「切换预设快速刷新」只负责快速重渲染列表,菜单形态与原生无异;
+// 收缩式菜单只归预设分组(走 Vue 的 renderPresetVuePromptControls)。
+// 参考 public/scripts/PromptManager.js renderPromptManagerListItems 的 controls 区块。
+function renderNativePromptControlsHtml({ canDelete, canEdit, canToggle, isEnabled }) {
+    const detachSpanHtml = canDelete
+        ? '<span title="Remove" class="prompt-manager-detach-action caution fa-solid fa-chain-broken fa-xs"></span>'
+        : '<span class="fa-solid"></span>';
+    const editSpanHtml = canEdit
+        ? '<span title="edit" class="prompt-manager-edit-action fa-solid fa-pencil fa-xs"></span>'
+        : '<span class="fa-solid"></span>';
     const toggleSpanHtml = canToggle
-        ? `<span title="${escapeHtml(isEnabled ? t`关闭条目` : t`开启条目`)}" class="menu_button bai-bai-preset-prompt-icon-button prompt-manager-toggle-action fa-solid ${isEnabled ? 'fa-toggle-on' : 'fa-toggle-off'}"></span>`
-        : '';
-    const deleteItemHtml = canDelete
-        ? renderPresetPromptActionButtonHtml({
-            action: 'delete',
-            icon: 'fa-trash',
-            text: t`删除或移除`,
-            caution: true,
-        })
-        : '';
-    const editItemHtml = canEdit
-        ? renderPresetPromptActionButtonHtml({
-            action: 'edit',
-            icon: 'fa-pencil',
-            text: t`编辑`,
-        })
-        : '';
-    const copyItemHtml = renderPresetPromptActionButtonHtml({
-        action: 'copy',
-        icon: 'fa-copy',
-        text: t`复制`,
-    });
+        ? `<span class="prompt-manager-toggle-action ${isEnabled ? 'fa-solid fa-toggle-on' : 'fa-solid fa-toggle-off'}"></span>`
+        : '<span class="fa-solid"></span>';
 
     return `
-        <span title="${escapeHtml(t`更多操作`)}" class="menu_button bai-bai-preset-prompt-icon-button bai-bai-preset-prompt-actions-hint fa-solid fa-ellipsis"></span>
-        <span class="bai-bai-preset-prompt-actions">
-            ${renderPresetPromptActionButtonHtml({
-        action: 'global-library',
-        icon: 'fa-database',
-        text: t`添加到全局库`,
-    })}
-            ${deleteItemHtml}
-            ${copyItemHtml}
-            ${editItemHtml}
-        </span>
+        ${detachSpanHtml}
+        ${editSpanHtml}
         ${toggleSpanHtml}
     `;
-}
-
-function renderPresetPromptActionButtonHtml({ action, icon, text, caution = false }) {
-    return `<span title="${escapeHtml(text)}" data-preset-prompt-action="${escapeHtml(action)}" class="menu_button bai-bai-preset-prompt-action-button fa-solid ${icon}${caution ? ' caution' : ''}"></span>`;
 }
 
 function schedulePresetVuePromptOrderSaveAfterDrop() {
@@ -10968,6 +10945,11 @@ function preventPresetDragEvent(event) {
 }
 
 function applyPresetSwitchOptimization() {
+    if (!settings.presetSwitchOptimizationEnabled) {
+        removePresetSwitchOptimization();
+        return;
+    }
+
     applyPresetSelectChangeDeferral();
     applyPresetDeleteSelectionOptimization();
     applyPresetListActionDelegation();
@@ -10994,6 +10976,29 @@ function applyPresetSwitchOptimization() {
     } else {
         eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, handler);
     }
+}
+
+// 切换优化关闭时的卸载。各事件代理(select/click/delete 等)内部都已按 settings 二次判定,
+// 关掉后即静默,无需逐个解绑;真正会留下可见副作用的是 render patch——它会接管
+// renderPromptManagerListItems 走快速刷新。单独关切换优化时(分组也关)必须主动拆掉 patch
+// 并重渲染一次,让列表回到 ST 原生渲染。
+// 分组开启时 patch 归分组管理(installPresetVuePromptListRenderPatch 由 applyPresetGrouping 装),
+// 此处不拆。
+function removePresetSwitchOptimization() {
+    if (isPresetGroupingEnabled()) {
+        return;
+    }
+
+    removePresetVuePromptListRenderPatch();
+
+    if (!promptManager || typeof promptManager.renderPromptManagerListItems !== 'function') {
+        return;
+    }
+
+    // patch 已拆,这次 renderPromptManagerListItems 会走 ST 原生实现重渲染列表。
+    void Promise.resolve(promptManager.renderPromptManagerListItems()).catch(error => {
+        console.debug(`${LOG_PREFIX} Failed to re-render prompt manager after disabling preset switch optimization`, error);
+    });
 }
 
 function applyPresetGroupDeletedCleanup() {
@@ -12727,7 +12732,9 @@ async function renderPromptManagerListItemsFast({ skipVueSyncIfCurrentCycle = fa
         const canToggle = prompt.marker && !FORCE_TOGGLE_PROMPTS.has(prompt.identifier)
             ? false
             : !toggleDisabled.has(prompt.identifier);
-        const controlsHtml = renderPresetPromptControlsHtml({
+        // 切换优化的快速刷新只在「未开启分组」时走到这里(分组开启会在上面委派给 Vue 后 return)。
+        // 渲染 ST 原生平铺菜单,而非收缩菜单——收缩菜单是预设分组专属。
+        const controlsHtml = renderNativePromptControlsHtml({
             canDelete,
             canEdit,
             canToggle,
