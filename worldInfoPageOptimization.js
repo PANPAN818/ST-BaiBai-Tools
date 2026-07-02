@@ -278,7 +278,6 @@ const WORLD_INFO_GLOBAL_SELECTOR_HOST_CLASS = 'bai-bai-wi-global-selector';
 const WORLD_INFO_GLOBAL_SELECTOR_SEARCH_MOBILE_SUPPRESSED_DATASET_KEY = 'baiBaiToolkitWorldInfoGlobalSelectorSearchMobileSuppressed';
 const WORLD_INFO_GLOBAL_SELECTOR_TOUCH_SELECT_THRESHOLD_PX = 16;
 const WORLD_INFO_SEARCH_REPLACE_PANEL_CLASS = 'bai-bai-wi-search-replace-panel';
-const WORLD_INFO_SEARCH_REPLACE_COLLAPSED_STORAGE_KEY = 'bai_bai_wi_search_replace_collapsed';
 const WORLD_INFO_ENTRY_DRAWER_TOGGLE_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer > .inline-drawer-header .inline-drawer-toggle';
 const WORLD_INFO_ENTRY_DRAWER_SELECTOR = '#world_popup_entries_list > .world_entry > .world_entry_form > .inline-drawer';
 const WORLD_INFO_LAZY_SELECT2_SELECTOR = '#world_popup_entries_list .world_entry_edit select[name="characterFilter"], #world_popup_entries_list .world_entry_edit select[name="triggers"]';
@@ -357,7 +356,11 @@ export function applyWorldInfoListOptimization() {
         installWorldInfoEditorSelectSearch(state);
         installWorldInfoGlobalSelectorOptimization(state);
         installWorldInfoMobileHeaderLayoutStyle();
-        installWorldInfoSearchReplacePanel(state);
+        if (settings.worldInfoSearchReplaceEnabled !== false) {
+            installWorldInfoSearchReplacePanel(state);
+        } else {
+            removeWorldInfoSearchReplacePanel(state);
+        }
         installWorldInfoMobileHeaderLayoutWatcher(state);
         installWorldInfoMobileLayoutMutationObserver(state);
     } else {
@@ -486,6 +489,11 @@ function restoreWorldInfoVueListPaginationPatch(state = getWorldInfoVueListOptim
 }
 
 function installWorldInfoSearchReplacePanel(state = getWorldInfoVueListOptimizationState()) {
+    if (!settings.worldInfoListOptimizationEnabled || settings.worldInfoSearchReplaceEnabled === false) {
+        removeWorldInfoSearchReplacePanel(state);
+        return;
+    }
+
     const list = document.getElementById('world_popup_entries_list');
 
     if (!(list instanceof HTMLElement)) {
@@ -502,7 +510,7 @@ function installWorldInfoSearchReplacePanel(state = getWorldInfoVueListOptimizat
 
     const panel = document.createElement('div');
     panel.className = `${WORLD_INFO_SEARCH_REPLACE_PANEL_CLASS} inline-drawer`;
-    const collapsed = getWorldInfoSearchReplaceCollapsed();
+    const collapsed = true;
     panel.dataset.collapsed = collapsed ? 'true' : 'false';
 
     const header = document.createElement('div');
@@ -517,7 +525,7 @@ function installWorldInfoSearchReplacePanel(state = getWorldInfoVueListOptimizat
 
     const summary = document.createElement('span');
     summary.className = 'bai-bai-wi-search-replace-summary';
-    summary.textContent = '未统计';
+    summary.textContent = '';
 
     const toggleIcon = document.createElement('div');
     toggleIcon.className = `inline-drawer-icon fa-solid ${collapsed ? 'fa-circle-chevron-down down' : 'fa-circle-chevron-up up'}`;
@@ -588,7 +596,6 @@ function installWorldInfoSearchReplacePanel(state = getWorldInfoVueListOptimizat
         const nextCollapsed = toggleIcon.classList.contains('down');
         panel.dataset.collapsed = nextCollapsed ? 'true' : 'false';
         header.setAttribute('aria-expanded', nextCollapsed ? 'false' : 'true');
-        setWorldInfoSearchReplaceCollapsed(nextCollapsed);
     });
 
     addHandler(findInput, 'input', () => {
@@ -607,13 +614,6 @@ function installWorldInfoSearchReplacePanel(state = getWorldInfoVueListOptimizat
         state.worldInfoSearchReplaceStats = null;
         refreshControls();
     });
-    const editorSelect = document.getElementById('world_editor_select');
-    if (editorSelect instanceof HTMLSelectElement) {
-        addHandler(editorSelect, 'change', () => {
-            state.worldInfoSearchReplaceStats = null;
-            refreshControls();
-        });
-    }
     addHandler(countButton, 'click', () => handleWorldInfoSearchReplaceCount(state, controls));
     addHandler(replaceButton, 'click', () => handleWorldInfoSearchReplaceApply(state, controls));
 
@@ -638,21 +638,13 @@ function refreshWorldInfoSearchReplacePanelControls(state, controls) {
     const hasQuery = findValue.length > 0;
     const worldName = getCurrentWorldInfoEditorName();
 
-    controls.countButton.disabled = !hasQuery || !worldName;
-    controls.replaceButton.disabled = !hasQuery || !worldName;
-
-    if (!worldName) {
-        controls.summary.textContent = '未选择世界书';
-        return;
-    }
-
-    if (!hasQuery) {
-        controls.summary.textContent = '输入查找内容';
-        return;
-    }
+    controls.countButton.disabled = !hasQuery;
+    controls.replaceButton.disabled = !hasQuery;
 
     const stats = state.worldInfoSearchReplaceStats;
-    if (stats
+    if (hasQuery
+        && worldName
+        && stats
         && stats.worldName === worldName
         && stats.findValue === findValue
         && stats.caseSensitive === controls.caseInput.checked
@@ -661,7 +653,7 @@ function refreshWorldInfoSearchReplacePanelControls(state, controls) {
         return;
     }
 
-    controls.summary.textContent = '未统计';
+    controls.summary.textContent = '';
 }
 
 async function handleWorldInfoSearchReplaceCount(state, controls) {
@@ -669,6 +661,7 @@ async function handleWorldInfoSearchReplaceCount(state, controls) {
 
     if (!query) {
         refreshWorldInfoSearchReplacePanelControls(state, controls);
+        showWorldInfoSearchReplaceToast('warning', '请先选择世界书。');
         return;
     }
 
@@ -695,6 +688,7 @@ async function handleWorldInfoSearchReplaceApply(state, controls) {
 
     if (!query) {
         refreshWorldInfoSearchReplacePanelControls(state, controls);
+        showWorldInfoSearchReplaceToast('warning', '请先选择世界书。');
         return;
     }
 
@@ -940,9 +934,14 @@ function getCurrentWorldInfoEditorName() {
         return null;
     }
 
-    const selectedIndex = Number.parseInt(select.value, 10);
-    if (Number.isInteger(selectedIndex) && world_names?.[selectedIndex]) {
+    const selectedValue = select.value.trim();
+    const selectedIndex = Number.parseInt(selectedValue, 10);
+    if (/^\d+$/.test(selectedValue) && Number.isInteger(selectedIndex) && world_names?.[selectedIndex]) {
         return world_names[selectedIndex];
+    }
+
+    if (world_names?.includes?.(selectedValue)) {
+        return selectedValue;
     }
 
     const selectedName = select.selectedOptions?.[0]?.textContent?.trim();
@@ -950,7 +949,7 @@ function getCurrentWorldInfoEditorName() {
 }
 
 function setWorldInfoSearchReplaceBusy(controls, busy) {
-    controls.countButton.disabled = busy || controls.findInput.value.length === 0 || !getCurrentWorldInfoEditorName();
+    controls.countButton.disabled = busy || controls.findInput.value.length === 0;
     controls.replaceButton.disabled = controls.countButton.disabled;
     controls.findInput.disabled = busy;
     controls.replaceInput.disabled = busy;
@@ -969,20 +968,6 @@ function showWorldInfoSearchReplaceToast(type, message) {
     }
 
     console[type === 'error' ? 'error' : 'info'](`${title}: ${message}`);
-}
-
-function getWorldInfoSearchReplaceCollapsed() {
-    try {
-        return globalThis.localStorage?.getItem(WORLD_INFO_SEARCH_REPLACE_COLLAPSED_STORAGE_KEY) === 'true';
-    } catch {
-        return true;
-    }
-}
-
-function setWorldInfoSearchReplaceCollapsed(collapsed) {
-    try {
-        globalThis.localStorage?.setItem(WORLD_INFO_SEARCH_REPLACE_COLLAPSED_STORAGE_KEY, collapsed ? 'true' : 'false');
-    } catch { /* ignore storage failures */ }
 }
 
 function installWorldInfoEditorSelectGrouping(state = getWorldInfoVueListOptimizationState()) {
@@ -2797,7 +2782,11 @@ function normalizeWorldInfoAppendArguments(args) {
 }
 
 function refreshWorldInfoVueListAfterAppend(list) {
-    installWorldInfoSearchReplacePanel();
+    if (settings.worldInfoSearchReplaceEnabled !== false) {
+        installWorldInfoSearchReplacePanel();
+    } else {
+        removeWorldInfoSearchReplacePanel();
+    }
     applyWorldInfoPopupLayout();
     applyWorldInfoMobileHeaderLayouts(list);
     applyWorldInfoMobileExpandedLayouts(list);

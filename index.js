@@ -23,7 +23,7 @@ import { sendMessageAs } from '../../../slash-commands.js';
 import { isAdmin } from '../../../user.js';
 import { debounce, download, getCharaFilename, getFileText, regexFromString, resetScrollHeight, setInfoBlock, uuidv4 } from '../../../utils.js';
 import { getCurrentPresetAPI as getRegexCurrentPresetAPI, getCurrentPresetName as getRegexCurrentPresetName, getScriptsByType as getRegexScriptsByType, runRegexScript, SCRIPT_TYPES as REGEX_SCRIPT_TYPES, substitute_find_regex } from '../../regex/engine.js';
-const CURRENT_VERSION = '0.28.0';
+const CURRENT_VERSION = '0.28.1';
 const LOCAL_ASSET_VERSION = getLocalAssetVersion(CURRENT_VERSION);
 const { SaveGenerateDisplay } = await importVersionedLocalModule('./saveGenerateDisplay.js');
 const chatOptimizations = await importVersionedLocalModule('./chatOptimizations.js');
@@ -342,6 +342,7 @@ const defaultSettings = {
     worldInfoDrawerOptimizationEnabled: true,
     worldInfoPageOptimizationEnabled: true,
     worldInfoListOptimizationEnabled: true,
+    worldInfoSearchReplaceEnabled: true,
     characterSearchInputOptimizationEnabled: true,
     baibaokuSettingsAccelerationEnabled: true,
     baibaokuLazyThemeLoadingEnabled: true,
@@ -3086,6 +3087,14 @@ async function renderSettingsPanel() {
             saveExtensionSettings();
             worldInfoPageOptimization.applyWorldInfoListOptimization();
             worldInfoPageOptimization.refreshWorldInfoEditorIfOpen();
+        });
+
+    $('#bai_bai_toolkit_world_info_search_replace_enabled')
+        .prop('checked', settings.worldInfoSearchReplaceEnabled !== false)
+        .on('input', function () {
+            settings.worldInfoSearchReplaceEnabled = Boolean($(this).prop('checked'));
+            saveExtensionSettings();
+            worldInfoPageOptimization.applyWorldInfoListOptimization();
         });
 
     $('#bai_bai_toolkit_character_search_input_optimization_enabled')
@@ -15772,4 +15781,3 @@ function isLocalOrPrivateIpv6(host) {
     return (firstValue & 0xfe00) === 0xfc00
         || (firstValue & 0xffc0) === 0xfe80;
 }
-
