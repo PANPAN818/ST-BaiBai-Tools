@@ -342,6 +342,7 @@ const defaultSettings = {
     worldInfoDrawerOptimizationEnabled: true,
     worldInfoPageOptimizationEnabled: true,
     worldInfoListOptimizationEnabled: true,
+    worldInfoSearchReplaceEnabled: true,
     characterSearchInputOptimizationEnabled: true,
     baibaokuSettingsAccelerationEnabled: true,
     baibaokuLazyThemeLoadingEnabled: true,
@@ -3086,6 +3087,14 @@ async function renderSettingsPanel() {
             saveExtensionSettings();
             worldInfoPageOptimization.applyWorldInfoListOptimization();
             worldInfoPageOptimization.refreshWorldInfoEditorIfOpen();
+        });
+
+    $('#bai_bai_toolkit_world_info_search_replace_enabled')
+        .prop('checked', settings.worldInfoSearchReplaceEnabled !== false)
+        .on('input', function () {
+            settings.worldInfoSearchReplaceEnabled = Boolean($(this).prop('checked'));
+            saveExtensionSettings();
+            worldInfoPageOptimization.applyWorldInfoListOptimization();
         });
 
     $('#bai_bai_toolkit_character_search_input_optimization_enabled')
@@ -15772,4 +15781,3 @@ function isLocalOrPrivateIpv6(host) {
     return (firstValue & 0xfe00) === 0xfc00
         || (firstValue & 0xffc0) === 0xfe80;
 }
-

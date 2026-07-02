@@ -357,7 +357,11 @@ export function applyWorldInfoListOptimization() {
         installWorldInfoEditorSelectSearch(state);
         installWorldInfoGlobalSelectorOptimization(state);
         installWorldInfoMobileHeaderLayoutStyle();
-        installWorldInfoSearchReplacePanel(state);
+        if (settings.worldInfoSearchReplaceEnabled !== false) {
+            installWorldInfoSearchReplacePanel(state);
+        } else {
+            removeWorldInfoSearchReplacePanel(state);
+        }
         installWorldInfoMobileHeaderLayoutWatcher(state);
         installWorldInfoMobileLayoutMutationObserver(state);
     } else {
@@ -486,6 +490,11 @@ function restoreWorldInfoVueListPaginationPatch(state = getWorldInfoVueListOptim
 }
 
 function installWorldInfoSearchReplacePanel(state = getWorldInfoVueListOptimizationState()) {
+    if (!settings.worldInfoListOptimizationEnabled || settings.worldInfoSearchReplaceEnabled === false) {
+        removeWorldInfoSearchReplacePanel(state);
+        return;
+    }
+
     const list = document.getElementById('world_popup_entries_list');
 
     if (!(list instanceof HTMLElement)) {
@@ -973,7 +982,8 @@ function showWorldInfoSearchReplaceToast(type, message) {
 
 function getWorldInfoSearchReplaceCollapsed() {
     try {
-        return globalThis.localStorage?.getItem(WORLD_INFO_SEARCH_REPLACE_COLLAPSED_STORAGE_KEY) === 'true';
+        const value = globalThis.localStorage?.getItem(WORLD_INFO_SEARCH_REPLACE_COLLAPSED_STORAGE_KEY);
+        return value === null ? true : value === 'true';
     } catch {
         return true;
     }
@@ -2797,7 +2807,11 @@ function normalizeWorldInfoAppendArguments(args) {
 }
 
 function refreshWorldInfoVueListAfterAppend(list) {
-    installWorldInfoSearchReplacePanel();
+    if (settings.worldInfoSearchReplaceEnabled !== false) {
+        installWorldInfoSearchReplacePanel();
+    } else {
+        removeWorldInfoSearchReplacePanel();
+    }
     applyWorldInfoPopupLayout();
     applyWorldInfoMobileHeaderLayouts(list);
     applyWorldInfoMobileExpandedLayouts(list);
