@@ -374,6 +374,7 @@ const defaultSettings = {
     presetToggleOptimizationEnabled: true,
     presetGroupingEnabled: true,
     presetGroupingEditButtonInMenuEnabled: false,
+    presetInterfaceCollapseEnabled: true,
     presetPromptCodeMirrorEditorEnabled: false,
     presetAutoSaveAfterPromptEditEnabled: false,
     regexQuickOperationOptimizationEnabled: true,
@@ -3827,6 +3828,7 @@ function applyFeatureSettings() {
     installCustomCssDebugFunction();
     applyCustomCssInputOptimization();
     presetOptimizations.applyPresetScrollOptimization();
+    presetOptimizations.applyPresetInterfaceCollapse();
     presetOptimizations.applyPresetDragOptimization();
     presetOptimizations.applyPresetGrouping();
     presetOptimizations.applyPresetBackupPreviewUi();
