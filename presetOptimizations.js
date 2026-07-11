@@ -457,26 +457,23 @@ function installPresetAutoBackupFetchHook() {
 
     state.wrappedFetch = function baiBaiToolkitPresetAutoBackupFetch(input, init) {
         const isPresetSaveRequest = isPresetAutoBackupSourceRequest(input, init);
+        const presetSaveBody = isPresetSaveRequest ? readPresetSaveBodySync(init) : null;
 
         if (state.isEnabled() && isPresetSaveRequest) {
             if (state.renameSuppress) {
                 // 重命名进行中:不立即备份,只同步记住最后一次保存内容,窗口关闭时再补一次。
-                capturePresetRenameBackupBodySync(state, input, init);
+                capturePresetRenameBackupBodySync(state, presetSaveBody);
             } else if (state.skipCount > 0) {
                 state.skipCount -= 1;
             } else {
-                void schedulePresetAutoBackupFromRequest(state, input, init);
+                void schedulePresetAutoBackupFromRequest(state, input, init, presetSaveBody);
             }
         }
 
         const requestPromise = state.originalFetch(input, init);
 
-        if (isPresetSaveRequest) {
-            const body = readPresetSaveBodySync(init);
-
-            if (isOpenAiPresetSaveBody(body)) {
-                trackOpenAiPresetSaveRequest(state, body, requestPromise);
-            }
+        if (isOpenAiPresetSaveBody(presetSaveBody)) {
+            trackOpenAiPresetSaveRequest(state, presetSaveBody, requestPromise);
         }
 
         return requestPromise;
@@ -520,8 +517,8 @@ function isPresetAutoBackupSourceRequest(input, init) {
     }
 }
 
-async function schedulePresetAutoBackupFromRequest(state, input, init) {
-    const body = await readPresetAutoBackupJsonBody(input, init);
+async function schedulePresetAutoBackupFromRequest(state, input, init, parsedBody = null) {
+    const body = parsedBody ?? await readPresetAutoBackupJsonBody(input, init);
 
     if (!isPresetAutoBackupBody(body)) {
         return;
@@ -557,12 +554,10 @@ function beginPresetRenameBackupSuppression() {
 }
 
 // 同步记录本次保存内容。重命名期间的所有 /save 的 init.body 都是 JSON 字符串,可直接解析。
-function capturePresetRenameBackupBodySync(state, input, init) {
+function capturePresetRenameBackupBodySync(state, body) {
     if (!state.renameSuppress) {
         return;
     }
-
-    const body = readPresetSaveBodySync(init);
 
     if (isPresetAutoBackupBody(body)) {
         state.renameSuppress.lastBody = body;
@@ -3404,7 +3399,10 @@ async function saveOpenAiPresetAfterPendingRuntimeCommit() {
 
     if (saveState.promise) {
         await saveState.promise.catch(() => {});
-        return;
+
+        if (saveState.promise || saveState.requestedRevision === null) {
+            return;
+        }
     }
 
     const savePromise = runOpenAiPresetSaveRequestQueue(saveState);
@@ -3589,12 +3587,10 @@ function syncOpenAiPresetCacheFromSnapshot(presetName, presetSnapshot) {
         return false;
     }
 
-    const preset = structuredClone(presetSnapshot);
-
     if (openai_settings[value] && typeof openai_settings[value] === 'object') {
-        Object.assign(openai_settings[value], preset);
+        Object.assign(openai_settings[value], presetSnapshot);
     } else {
-        openai_settings[value] = preset;
+        openai_settings[value] = presetSnapshot;
     }
 
     return true;
@@ -11437,7 +11433,7 @@ function applyPendingPresetPromptServiceSaveToMemory(entry) {
     const promptOrder = structuredClone(entry.promptOrder);
 
     if (oai_settings?.preset_settings_openai === entry.presetName) {
-        oai_settings.prompt_order = structuredClone(promptOrder);
+        oai_settings.prompt_order = promptOrder;
         if (promptManager) {
             promptManager.serviceSettings = oai_settings;
         }
