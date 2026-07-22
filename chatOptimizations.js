@@ -12,9 +12,14 @@ import {
 } from '../../../../script.js';
 import * as scriptModule from '../../../../script.js';
 import { t } from '../../../i18n.js';
+import { power_user } from '../../../power-user.js';
 import { isMobile } from '../../../RossAscends-mods.js';
 import { timestampToMoment } from '../../../utils.js';
 
+const REDUCE_LOADED_FLOORS_FETCH_KEY = '__baiBaiToolkitReduceLoadedFloorsFetchPatched';
+const REDUCE_LOADED_FLOORS_LIMIT = 10;
+const REDUCE_LOADED_FLOORS_INPUT_IDS = new Set(['chat_truncation', 'chat_truncation_counter']);
+const REDUCE_LOADED_FLOORS_CHAT_PATHS = new Set(['/api/chats/get', '/api/chats/group/get']);
 const FAST_CHAT_SEARCH_FETCH_KEY = '__baiBaiToolkitFastChatSearchFetchPatched';
 const BAIBAOKU_FAST_SEARCH_URL = '/api/plugins/baibaoku/v1/chats/fast-search';
 const FAST_CHAT_BACKUPS_FETCH_KEY = '__baiBaiToolkitFastChatBackupsFetchPatched';
@@ -160,6 +165,14 @@ export function bindChatOptimizationSettings({ saveSettings } = {}) {
             applyLongChatDomRenderOptimization();
         });
 
+    $('#bai_bai_toolkit_reduce_loaded_floors_enabled')
+        .prop('checked', settings.reduceLoadedFloorsEnabled === true)
+        .on('input', function () {
+            settings.reduceLoadedFloorsEnabled = Boolean($(this).prop('checked'));
+            persistSettings();
+            applyReduceLoadedFloors();
+        });
+
     $('#bai_bai_toolkit_message_completion_scroll_to_middle_enabled')
         .prop('checked', settings.messageCompletionScrollToMiddleEnabled !== false)
         .on('input', function () {
@@ -261,6 +274,124 @@ export function applyChatOptimizationCompatibilityIndicators(container) {
             true,
             '当前酒馆版本未导出 messageEdit，请更新酒馆后使用。',
         );
+    }
+}
+
+function applyReduceLoadedFloors() {
+    const state = installReduceLoadedFloorsGuard();
+    if (state) {
+        state.isEnabled = () => settings.reduceLoadedFloorsEnabled === true;
+        state.enforce = enforceReducedLoadedFloors;
+    }
+
+    if (settings.reduceLoadedFloorsEnabled === true) {
+        enforceReducedLoadedFloors({ persist: true });
+    }
+}
+
+function installReduceLoadedFloorsGuard() {
+    const existing = globalThis[REDUCE_LOADED_FLOORS_FETCH_KEY];
+    if (existing?.wrappedFetch) {
+        return existing;
+    }
+
+    const originalFetch = globalThis.fetch;
+    if (typeof originalFetch !== 'function') {
+        return null;
+    }
+
+    const state = {
+        originalFetch: originalFetch.bind(globalThis),
+        wrappedFetch: null,
+        inputHandler: null,
+        isEnabled: () => settings.reduceLoadedFloorsEnabled === true,
+        enforce: enforceReducedLoadedFloors,
+    };
+
+    state.inputHandler = (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)
+            || !REDUCE_LOADED_FLOORS_INPUT_IDS.has(target.id)
+            || !state.isEnabled()
+            || target.value.trim() === '') {
+            return;
+        }
+
+        state.enforce({
+            candidateValue: target.value,
+            persist: true,
+        });
+    };
+
+    document.addEventListener('input', state.inputHandler);
+
+    state.wrappedFetch = async function baiBaiToolkitReduceLoadedFloorsFetch(input, init) {
+        if (state.isEnabled() && isChatLoadRequest(input, init)) {
+            state.enforce({ persist: true });
+        }
+
+        return state.originalFetch(input, init);
+    };
+
+    state.wrappedFetch[REDUCE_LOADED_FLOORS_FETCH_KEY] = true;
+    state.wrappedFetch.__baiBaiToolkitOriginalFetch = originalFetch;
+    globalThis[REDUCE_LOADED_FLOORS_FETCH_KEY] = state;
+    globalThis.fetch = state.wrappedFetch;
+    return state;
+}
+
+function enforceReducedLoadedFloors({
+    candidateValue = power_user.chat_truncation,
+    persist = false,
+} = {}) {
+    if (settings.reduceLoadedFloorsEnabled !== true) {
+        return false;
+    }
+
+    const normalizedCandidate = String(candidateValue ?? '').trim();
+    if (!normalizedCandidate) {
+        return false;
+    }
+
+    const value = Number(normalizedCandidate);
+    if (!Number.isFinite(value) || (value !== 0 && value <= REDUCE_LOADED_FLOORS_LIMIT)) {
+        return false;
+    }
+
+    const changed = Number(power_user.chat_truncation) !== REDUCE_LOADED_FLOORS_LIMIT
+        || value !== REDUCE_LOADED_FLOORS_LIMIT;
+
+    power_user.chat_truncation = REDUCE_LOADED_FLOORS_LIMIT;
+    syncReducedLoadedFloorsControls();
+
+    if (changed && persist) {
+        saveSettingsDebounced();
+    }
+
+    return changed;
+}
+
+function syncReducedLoadedFloorsControls() {
+    for (const id of REDUCE_LOADED_FLOORS_INPUT_IDS) {
+        const input = document.getElementById(id);
+        if (input instanceof HTMLInputElement) {
+            input.value = String(REDUCE_LOADED_FLOORS_LIMIT);
+        }
+    }
+}
+
+function isChatLoadRequest(input, init) {
+    try {
+        const isRequest = typeof Request !== 'undefined' && input instanceof Request;
+        const rawUrl = isRequest ? input.url : String(input);
+        const url = new URL(rawUrl, location.origin);
+        const method = String(init?.method || (isRequest ? input.method : 'GET')).toUpperCase();
+
+        return method === 'POST'
+            && url.origin === location.origin
+            && REDUCE_LOADED_FLOORS_CHAT_PATHS.has(url.pathname);
+    } catch {
+        return false;
     }
 }
 
@@ -6034,6 +6165,7 @@ export {
     applyChatDeleteEditFlowOptimization,
     applyFastChatListScrollOptimization,
     applyLongChatDomRenderOptimization,
+    applyReduceLoadedFloors,
     applyMessageCompletionScrollToMiddle,
     applyMessageCompletionSound,
     applyMessageEditBottomActions,

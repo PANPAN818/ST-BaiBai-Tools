@@ -23,7 +23,7 @@ import { sendMessageAs } from '../../../slash-commands.js';
 import { isAdmin } from '../../../user.js';
 import { debounce, download, getCharaFilename, getFileText, regexFromString, resetScrollHeight, setInfoBlock, uuidv4 } from '../../../utils.js';
 import { getCurrentPresetAPI as getRegexCurrentPresetAPI, getCurrentPresetName as getRegexCurrentPresetName, getScriptsByType as getRegexScriptsByType, runRegexScript, SCRIPT_TYPES as REGEX_SCRIPT_TYPES, substitute_find_regex } from '../../regex/engine.js';
-const CURRENT_VERSION = '0.29.0';
+const CURRENT_VERSION = '0.29.1';
 const LOCAL_ASSET_VERSION = getLocalAssetVersion(CURRENT_VERSION);
 const { SaveGenerateDisplay } = await importVersionedLocalModule('./saveGenerateDisplay.js');
 const chatOptimizations = await importVersionedLocalModule('./chatOptimizations.js');
@@ -359,6 +359,7 @@ const defaultSettings = {
     saveRequestGzipEnabled: true,
     translateMessageUpdatedOptimizationEnabled: true,
     longChatDomRenderOptimizationEnabled: true,
+    reduceLoadedFloorsEnabled: true,
     messageCompletionScrollToMiddleEnabled: true,
     chatListScrollOptimizationEnabled: true,
     chatListAutoClearEnabled: true,
@@ -3854,6 +3855,7 @@ function applyFeatureSettings() {
     chatOptimizations.applyWelcomeRecentChatDirectOpenOptimization();
     chatOptimizations.applyChatDeleteEditFlowOptimization();
     applyTranslateMessageUpdatedOptimization();
+    chatOptimizations.applyReduceLoadedFloors();
     chatOptimizations.applyLongChatDomRenderOptimization();
     chatOptimizations.applyMessageCompletionScrollToMiddle();
     chatOptimizations.applyMobileAutoKeyboardSuppression();
